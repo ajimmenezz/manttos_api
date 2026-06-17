@@ -54,4 +54,14 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Site::class, 'site_user')->withTimestamps();
     }
+
+    /**
+     * Pueden emitir llaves de API todos los roles por debajo de admin
+     * (admin-cliente, admin-sitio, ingeniero, técnico). Nunca superadmin ni admin:
+     * el acceso por API jamás opera a nivel administrativo global.
+     */
+    public function canManageApiTokens(): bool
+    {
+        return ! $this->hasAnyRole(['superadmin', 'admin']);
+    }
 }

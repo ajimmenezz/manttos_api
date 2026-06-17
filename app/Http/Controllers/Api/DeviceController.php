@@ -35,6 +35,8 @@ class DeviceController extends Controller
 
         $cfFilters = array_filter((array) $request->cf, fn($v) => $v !== null && $v !== '');
         $didSearch = trim((string) $request->did);
+        // Clave del campo DID (puede no ser 'did' si se definió con otra clave).
+        $didKey = trim((string) $request->did_key) ?: 'did';
 
         $devices = $directory->devices()
             ->when($request->search, fn ($q) => $q->where('name', 'ilike', "%{$request->search}%"))
@@ -44,7 +46,7 @@ class DeviceController extends Controller
                     $q->whereRaw("custom_fields->>? = ?", [$key, $value]);
                 }
             })
-            ->when($didSearch !== '', fn ($q) => $q->whereRaw("custom_fields->>'did' ILIKE ?", ["%{$didSearch}%"]))
+            ->when($didSearch !== '', fn ($q) => $q->whereRaw("custom_fields->>? ILIKE ?", [$didKey, "%{$didSearch}%"]))
             ->orderBy('created_at')
             ->paginate($request->per_page ?? 20);
 

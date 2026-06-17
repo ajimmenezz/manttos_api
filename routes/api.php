@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\ActivityTypeController;
 use App\Http\Controllers\Api\AppSettingController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DeveloperTokenController;
+use App\Http\Middleware\RequireWriteScope;
 use App\Http\Controllers\Api\MaintenanceActivityController;
 use App\Http\Controllers\Api\MaintenanceDashboardController;
 use App\Http\Controllers\Api\MediaController;
@@ -39,6 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Configuración del sistema
     Route::get('/settings',            [AppSettingController::class, 'index']);
+    Route::get('/settings/tenants',    [AppSettingController::class, 'tenants']);
     Route::put('/settings',            [AppSettingController::class, 'update']);
     Route::post('/settings/test-mail', [AppSettingController::class, 'testMail']);
     Route::get('/me', [AuthController::class, 'me']);
@@ -46,6 +49,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::put('/profile', [ProfileController::class, 'update']);
+
+    // Llaves de API para desarrolladores (gestión desde la sesión del usuario).
+    // El propio controlador veda a superadmin/admin.
+    Route::get('/developer/tokens',         [DeveloperTokenController::class, 'index']);
+    Route::post('/developer/tokens',        [DeveloperTokenController::class, 'store']);
+    Route::delete('/developer/tokens/{id}', [DeveloperTokenController::class, 'destroy']);
 
     // Permisos
     Route::get('/permissions', [PermissionController::class, 'index']);
@@ -110,6 +119,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/device-types',         [SystemController::class, 'deviceTypes']);
         Route::post('/device-types/sync',   [SystemController::class, 'syncDeviceTypes']);
         Route::get('/device-types/active',  [SystemController::class, 'activeDeviceTypes']);
+        Route::get('/activity-types',       [SystemController::class, 'activityTypes']);
+        Route::get('/frequencies',          [SystemController::class, 'frequencies']);
+        Route::post('/frequencies/sync',    [SystemController::class, 'syncFrequencies']);
         Route::get('/fields',                          [SystemController::class, 'fields']);
         Route::post('/fields',                         [SystemController::class, 'storeField']);
         Route::post('/fields/reorder',                 [SystemController::class, 'reorderFields']);
@@ -158,6 +170,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);
     Route::post('/my-maintenances',         [MaintenanceController::class, 'quickCreate']);
     Route::get('/maintenances/{maintenance}', [MaintenanceController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/frequencies',      [MaintenanceController::class, 'frequencies']);
+    Route::post('/maintenances/{maintenance}/frequencies/sync', [MaintenanceController::class, 'syncFrequencies']);
+    Route::get('/maintenances/{maintenance}/contract-files',                 [MaintenanceController::class, 'contractFiles']);
+    Route::post('/maintenances/{maintenance}/contract-files',                [MaintenanceController::class, 'uploadContractFiles']);
+    Route::delete('/maintenances/{maintenance}/contract-files/{file}',       [MaintenanceController::class, 'deleteContractFile']);
 
     // Programación de dispositivos por mantenimiento
     Route::get('/maintenances/{maintenance}/device-schedules',               [DeviceScheduleController::class, 'index']);
@@ -166,7 +183,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/maintenances/{maintenance}/device-schedules/{schedule}', [DeviceScheduleController::class, 'destroy']);
 
     // Actividades de mantenimiento
-    Route::get('/maintenances/{maintenance}/dashboard',        [MaintenanceDashboardController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/dashboard',          [MaintenanceDashboardController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/contract-dashboard', [MaintenanceDashboardController::class, 'contractDashboard']);
     Route::get('/maintenances/{maintenance}/activity-types',   [MaintenanceActivityController::class, 'activityTypes']);
     Route::get('/maintenances/{maintenance}/activity-devices', [MaintenanceActivityController::class, 'devices']);
     Route::get('/maintenances/{maintenance}/activity-counts',  [MaintenanceActivityController::class, 'activityCounts']);
@@ -195,4 +213,47 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/{client}/sites/{site}/admins/candidates', [SiteUserController::class, 'candidates']);
     Route::post('/clients/{client}/sites/{site}/admins', [SiteUserController::class, 'store']);
     Route::delete('/clients/{client}/sites/{site}/admins/{user}', [SiteUserController::class, 'destroy']);
+});
+
+/*
+|--------------------------------------------------------------------------
+| API pública versionada (v1) — para fronts de terceros
+|--------------------------------------------------------------------------
+| Fachada estable sobre los controladores existentes: las llaves de API actúan
+| como el usuario que las creó, así que heredan su alcance de datos y permisos.
+| Los endpoints mutadores exigen una llave con scope de escritura (RequireWriteScope).
+| Documentado en la app: Desarrolladores → APIs.
+*/
+Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+    // Identidad y alcance del token actual
+    Route::get('/me', [AuthController::class, 'me']);
+
+    // Clientes y sitios (lectura, scopeada por rol del usuario)
+    Route::get('/clients',                        [ClientController::class, 'index']);
+    Route::get('/clients/{client}',               [ClientController::class, 'show']);
+    Route::get('/clients/{client}/sites',         [SiteController::class, 'index']);
+    Route::get('/clients/{client}/sites/{site}',  [SiteController::class, 'show']);
+    Route::get('/clients/{client}/sites/{site}/maintenances', [MaintenanceController::class, 'index']);
+
+    // Catálogos activos (industrias, tipos de sitio, sistemas, etc.)
+    Route::get('/catalogs/active/{type}', [CatalogController::class, 'active']);
+
+    // Mantenimientos (vista consolidada scopeada) + sub-recursos por mantenimiento
+    Route::get('/maintenances',                                  [MaintenanceController::class, 'myMaintenances']);
+    Route::get('/maintenances/{maintenance}',                    [MaintenanceController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/activity-devices',   [MaintenanceActivityController::class, 'devices']);
+    Route::get('/maintenances/{maintenance}/activity-types',     [MaintenanceActivityController::class, 'activityTypes']);
+    Route::get('/maintenances/{maintenance}/activity-counts',    [MaintenanceActivityController::class, 'activityCounts']);
+    Route::get('/maintenances/{maintenance}/log',                [MaintenanceActivityController::class, 'log']);
+    Route::get('/maintenances/{maintenance}/dashboard',          [MaintenanceDashboardController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/contract-dashboard', [MaintenanceDashboardController::class, 'contractDashboard']);
+    Route::get('/maintenances/{maintenance}/devices/{device}/activities', [MaintenanceActivityController::class, 'deviceActivities']);
+
+    // Escritura: requiere una llave con scope de escritura Y el permiso del usuario.
+    Route::middleware(RequireWriteScope::class)->group(function () {
+        Route::post('/clients/{client}/sites/{site}/maintenances',              [MaintenanceController::class, 'store']);
+        Route::put('/clients/{client}/sites/{site}/maintenances/{maintenance}', [MaintenanceController::class, 'update']);
+        Route::post('/maintenances/{maintenance}/activities',                   [MaintenanceActivityController::class, 'store']);
+        Route::put('/maintenances/{maintenance}/activities/{activity}',         [MaintenanceActivityController::class, 'update']);
+    });
 });

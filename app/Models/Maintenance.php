@@ -7,10 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 class Maintenance extends Model
 {
     public const STATUSES = ['programado', 'en_curso', 'completado', 'cancelado'];
+    public const TYPES    = ['normal', 'contrato'];
 
     protected $fillable = [
         'site_id',
         'catalog_id',
+        'type',
         'start_date',
         'end_date',
         'status',

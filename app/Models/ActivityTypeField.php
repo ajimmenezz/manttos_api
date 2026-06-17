@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class ActivityTypeField extends Model
 {
-    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'image'];
+    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'image', 'leyenda'];
 
     protected $fillable = [
         'activity_type_id',
@@ -15,6 +15,8 @@ class ActivityTypeField extends Model
         'field_key',
         'field_type',
         'catalog_type',
+        'legend_text',
+        'rules',
         'is_required',
         'max_length',
         'sort_order',
@@ -30,6 +32,7 @@ class ActivityTypeField extends Model
             'show_in_bitacora' => 'boolean',
             'max_length'       => 'integer',
             'sort_order'       => 'integer',
+            'rules'            => 'array',
         ];
     }
 

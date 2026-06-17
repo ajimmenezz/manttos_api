@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Catalog;
+use App\Models\Device;
+use App\Models\MaintenanceFrequency;
 use App\Models\SystemField;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,7 +42,9 @@ class SystemController extends Controller
         $system = $this->resolveSystem($id);
 
         $request->validate([
-            'device_type_ids'   => 'required|array',
+            // 'present' (no 'required') para permitir un arreglo vacío: desasociar
+            // todos los tipos es válido (regla de negocio: sin tipos → aparecen todos).
+            'device_type_ids'   => 'present|array',
             'device_type_ids.*' => 'exists:catalogs,id',
         ]);
 
@@ -50,6 +54,42 @@ class SystemController extends Controller
             ->exists();
 
         abort_if($invalid, 422, 'Todos los IDs deben ser tipos de dispositivo.');
+
+        // Integridad: no permitir desasociar un tipo que aún está en uso por algún
+        // dispositivo de los directorios de este sistema. Hay que eliminar o
+        // re-tipificar esos dispositivos antes de quitar la asociación.
+        $currentIds  = $system->deviceTypes()->get(['catalogs.id'])->pluck('id')->all();
+        $newIds      = array_map('intval', $request->device_type_ids);
+        $removingIds = array_diff($currentIds, $newIds);
+
+        if (! empty($removingIds)) {
+            $removingLabels = Catalog::whereIn('id', $removingIds)->pluck('label')->all();
+
+            $conflicts = Device::whereIn('device_type', $removingLabels)
+                ->whereHas('directory', fn ($q) => $q->where('catalog_id', $system->id))
+                ->with(['directory:id,name,site_id,catalog_id', 'directory.site:id,name'])
+                ->get(['id', 'directory_id', 'device_type']);
+
+            if ($conflicts->isNotEmpty()) {
+                $details = $conflicts
+                    ->groupBy(fn ($d) => $d->directory_id . '|' . $d->device_type)
+                    ->map(function ($group) {
+                        $first   = $group->first();
+                        $dir     = $first->directory;
+                        $dirName = $dir?->display_name ?? 'directorio';
+                        $site    = $dir?->site?->name;
+                        $where   = $site ? "{$dirName} ({$site})" : $dirName;
+                        return "{$group->count()} dispositivo(s) de tipo «{$first->device_type}» en el directorio \"{$where}\"";
+                    })
+                    ->values();
+
+                return response()->json([
+                    'message'   => 'No se puede desasociar: existe ' . $details->implode('; ')
+                        . '. Elimina o re-tipifica esos dispositivos antes de quitar la asociación.',
+                    'conflicts' => $details,
+                ], 422);
+            }
+        }
 
         $system->deviceTypes()->sync($request->device_type_ids);
 
@@ -67,11 +107,11 @@ class SystemController extends Controller
         $types = $system->deviceTypes()
             ->where('catalogs.is_active', true)
             ->orderBy('catalogs.label')
-            ->get(['catalogs.id', 'catalogs.label']);
+            ->get(['catalogs.id', 'catalogs.label', 'catalogs.nomenclatura']);
 
         // Si el sistema no tiene tipos asignados, devuelve todos los activos
         if ($types->isEmpty()) {
-            $types = Catalog::ofType(Catalog::TYPE_DEVICE_TYPE)->get(['id', 'label']);
+            $types = Catalog::ofType(Catalog::TYPE_DEVICE_TYPE)->get(['id', 'label', 'nomenclatura']);
         }
 
         return response()->json($types);
@@ -193,12 +233,109 @@ class SystemController extends Controller
             'system_ids.*' => 'exists:catalogs,id',
         ]);
 
+        // Integridad (dirección inversa): no desasociar un sistema si hay dispositivos
+        // de este tipo en los directorios de ese sistema.
+        $currentSystemIds  = $deviceType->systems()->get(['catalogs.id'])->pluck('id')->all();
+        $newSystemIds      = array_map('intval', $request->system_ids);
+        $removingSystemIds = array_diff($currentSystemIds, $newSystemIds);
+
+        if (! empty($removingSystemIds)) {
+            $conflicts = Device::where('device_type', $deviceType->label)
+                ->whereHas('directory', fn ($q) => $q->whereIn('catalog_id', $removingSystemIds))
+                ->with(['directory:id,name,site_id,catalog_id', 'directory.site:id,name'])
+                ->get(['id', 'directory_id', 'device_type']);
+
+            if ($conflicts->isNotEmpty()) {
+                $details = $conflicts
+                    ->groupBy('directory_id')
+                    ->map(function ($group) {
+                        $dir     = $group->first()->directory;
+                        $dirName = $dir?->display_name ?? 'directorio';
+                        $site    = $dir?->site?->name;
+                        $where   = $site ? "{$dirName} ({$site})" : $dirName;
+                        return "{$group->count()} dispositivo(s) en el directorio \"{$where}\"";
+                    })
+                    ->values();
+
+                return response()->json([
+                    'message'   => 'No se puede desasociar: existe ' . $details->implode('; ')
+                        . '. Elimina o re-tipifica esos dispositivos antes de quitar la asociación.',
+                    'conflicts' => $details,
+                ], 422);
+            }
+        }
+
         $deviceType->systems()->sync($request->system_ids);
 
         return response()->json([
             'message' => 'Sistemas actualizados.',
             'systems' => $deviceType->systems()->orderBy('label')->get(['catalogs.id', 'catalogs.label']),
         ]);
+    }
+
+    // ── Tipos de actividad y frecuencias de mantenimiento ─────────────────────
+
+    /** Tipos de actividad asociados al sistema (activos). */
+    public function activityTypes(int $id): JsonResponse
+    {
+        $system = $this->resolveSystem($id);
+
+        return response()->json(
+            $system->activityTypes()
+                ->where('catalogs.is_active', true)
+                ->orderBy('catalogs.label')
+                ->get(['catalogs.id', 'catalogs.label'])
+        );
+    }
+
+    /** Frecuencias de mantenimiento definidas para el sistema. */
+    public function frequencies(int $id): JsonResponse
+    {
+        $system = $this->resolveSystem($id);
+
+        return response()->json(
+            MaintenanceFrequency::where('system_id', $system->id)
+                ->get(['device_type_id', 'activity_type_id', 'period_value', 'period_unit'])
+        );
+    }
+
+    /** Reemplaza (sync) las frecuencias del sistema con la matriz enviada. */
+    public function syncFrequencies(Request $request, int $id): JsonResponse
+    {
+        $system = $this->resolveSystem($id);
+
+        $data = $request->validate([
+            'frequencies'                    => 'present|array',
+            'frequencies.*.device_type_id'   => 'required|integer|exists:catalogs,id',
+            'frequencies.*.activity_type_id' => 'required|integer|exists:catalogs,id',
+            // 'as_needed' (cada que sea necesario) no lleva valor; el resto sí.
+            'frequencies.*.period_unit'      => 'required|in:' . implode(',', MaintenanceFrequency::UNITS),
+            'frequencies.*.period_value'     => 'nullable|integer|min:1|max:9999|required_unless:frequencies.*.period_unit,as_needed',
+        ]);
+
+        // Solo se aceptan combinaciones válidas: el tipo de dispositivo debe estar
+        // asociado al sistema y el tipo de actividad debe estar enlazado al sistema.
+        $validDeviceTypes  = $system->deviceTypes()->pluck('catalogs.id')->all();
+        $validActivityTypes = $system->activityTypes()->pluck('catalogs.id')->all();
+
+        DB::transaction(function () use ($system, $data, $validDeviceTypes, $validActivityTypes) {
+            MaintenanceFrequency::where('system_id', $system->id)->delete();
+
+            foreach ($data['frequencies'] as $row) {
+                if (! in_array((int) $row['device_type_id'], $validDeviceTypes, true)) continue;
+                if (! in_array((int) $row['activity_type_id'], $validActivityTypes, true)) continue;
+
+                MaintenanceFrequency::create([
+                    'system_id'        => $system->id,
+                    'device_type_id'   => $row['device_type_id'],
+                    'activity_type_id' => $row['activity_type_id'],
+                    'period_value'     => $row['period_unit'] === 'as_needed' ? null : $row['period_value'],
+                    'period_unit'      => $row['period_unit'],
+                ]);
+            }
+        });
+
+        return response()->json(['message' => 'Frecuencias de mantenimiento actualizadas.']);
     }
 
     // ── Campos de plantilla ───────────────────────────────────────────────────
@@ -230,8 +367,9 @@ class SystemController extends Controller
         $data = $request->validate([
             'label'             => 'required|string|max:100',
             'field_key'         => 'required|string|max:60|regex:/^[a-z][a-z0-9_]*$/',
-            'field_type'        => 'required|in:text,number,date,boolean,list',
+            'field_type'        => 'required|in:' . implode(',', SystemField::FIELD_TYPES),
             'catalog_type'      => 'nullable|string|required_if:field_type,list',
+            'config'            => 'nullable|array',
             'is_required'       => 'boolean',
             'max_length'        => 'nullable|integer|min:1|max:5000',
             'sort_order'        => 'nullable|integer|min:0',
@@ -242,6 +380,16 @@ class SystemController extends Controller
 
         $exists = $system->fields()->whereNull('client_id')->where('field_key', $data['field_key'])->exists();
         abort_if($exists, 422, "Ya existe un campo con la clave '{$data['field_key']}' en este sistema.");
+
+        if ($data['field_type'] === 'did') {
+            abort_if(
+                $system->fields()->whereNull('client_id')->where('field_type', 'did')->exists(),
+                422, 'Este sistema ya tiene un campo DID. Solo puede haber uno por sistema.'
+            );
+            $this->validateDidConfig($system, $data['config'] ?? []);
+        } else {
+            $data['config'] = null;
+        }
 
         $field = $system->fields()->create([
             ...$data,
@@ -260,8 +408,9 @@ class SystemController extends Controller
 
         $data = $request->validate([
             'label'             => 'required|string|max:100',
-            'field_type'        => 'required|in:text,number,date,boolean,list',
+            'field_type'        => 'required|in:' . implode(',', SystemField::FIELD_TYPES),
             'catalog_type'      => 'nullable|string|required_if:field_type,list',
+            'config'            => 'nullable|array',
             'is_required'       => 'boolean',
             'max_length'        => 'nullable|integer|min:1|max:5000',
             'sort_order'        => 'nullable|integer|min:0',
@@ -270,9 +419,60 @@ class SystemController extends Controller
 
         abort_if(strtolower(trim($data['label'])) === 'id', 422, '"ID" es un nombre reservado por el sistema. Usa una etiqueta diferente.');
 
+        if ($data['field_type'] === 'did') {
+            abort_if(
+                $system->fields()->whereNull('client_id')->where('field_type', 'did')->where('id', '!=', $field->id)->exists(),
+                422, 'Este sistema ya tiene un campo DID. Solo puede haber uno por sistema.'
+            );
+            $this->validateDidConfig($system, $data['config'] ?? []);
+        } else {
+            $data['config'] = null;
+        }
+
+        // No permitir quitar la obligatoriedad si el campo se usa en el patrón de un DID.
+        if (array_key_exists('is_required', $data) && ! $data['is_required']
+            && $this->patternReferencedKeys($system)->contains($field->field_key)
+        ) {
+            abort(422, "No puedes quitar la obligatoriedad de «{$field->label}»: se usa en el patrón de un DID. Quítalo del patrón primero.");
+        }
+
         $field->update($data);
 
         return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
+    }
+
+    /** Field keys referenciados por el patrón de algún campo DID del sistema. */
+    private function patternReferencedKeys(Catalog $system, ?int $excludeFieldId = null)
+    {
+        return $system->fields()->whereNull('client_id')
+            ->where('field_type', 'did')
+            ->when($excludeFieldId, fn ($q) => $q->where('id', '!=', $excludeFieldId))
+            ->get()
+            ->flatMap(fn ($f) => collect($f->config['pattern'] ?? [])
+                ->where('kind', 'field')->pluck('field_key'))
+            ->filter()->unique()->values();
+    }
+
+    /** Valida la configuración de un campo DID (modo y, si patrón, referencias obligatorias). */
+    private function validateDidConfig(Catalog $system, array $config): void
+    {
+        $mode = $config['did_mode'] ?? null;
+        abort_unless(in_array($mode, ['number', 'text', 'pattern'], true), 422, 'Modo de DID inválido.');
+
+        if ($mode === 'pattern') {
+            $tokens = $config['pattern'] ?? [];
+            abort_if(empty($tokens), 422, 'El patrón del DID no puede estar vacío.');
+
+            $fieldKeys = collect($tokens)->where('kind', 'field')->pluck('field_key')->filter()->unique();
+            if ($fieldKeys->isNotEmpty()) {
+                $required = $system->fields()->whereNull('client_id')
+                    ->whereIn('field_key', $fieldKeys)->where('is_required', true)
+                    ->pluck('field_key');
+                $missing = $fieldKeys->diff($required);
+                abort_if($missing->isNotEmpty(), 422,
+                    'El patrón solo puede usar campos obligatorios. No son obligatorios: ' . $missing->implode(', '));
+            }
+        }
     }
 
     public function toggleField(int $id, SystemField $field): JsonResponse
@@ -327,6 +527,11 @@ class SystemController extends Controller
 
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
+
+        abort_if(
+            $this->patternReferencedKeys($system, $field->id)->contains($field->field_key),
+            422, "No puedes eliminar «{$field->label}»: se usa en el patrón de un DID. Quítalo del patrón primero."
+        );
 
         $fieldKey = $field->field_key;
 

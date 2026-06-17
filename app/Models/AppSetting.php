@@ -12,21 +12,39 @@ class AppSetting extends Model
     protected $keyType = 'string';
     public    $timestamps = false;
 
-    protected $fillable = ['key', 'value'];
+    protected $fillable = ['key', 'value', 'tenant'];
 
-    public const ALLOWED_KEYS = ['app_name', 'logo_url', 'login_bg_url', 'color_preset'];
+    public const DEFAULT_TENANT = 'default';
 
-    public static function allAsMap(): array
+    public const ALLOWED_KEYS = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme'];
+
+    /**
+     * Mapa de ajustes para un tenant (dominio). Parte de los valores del tenant
+     * `default` y los sobrescribe con los específicos del dominio dado.
+     */
+    public static function allAsMap(string $tenant = self::DEFAULT_TENANT): array
     {
-        return DB::table('app_settings')
+        $base = DB::table('app_settings')
+            ->where('tenant', self::DEFAULT_TENANT)
             ->pluck('value', 'key')
             ->toArray();
+
+        if ($tenant === self::DEFAULT_TENANT) {
+            return $base;
+        }
+
+        $override = DB::table('app_settings')
+            ->where('tenant', $tenant)
+            ->pluck('value', 'key')
+            ->toArray();
+
+        return array_merge($base, $override);
     }
 
-    public static function setValue(string $key, ?string $value): void
+    public static function setValue(string $key, ?string $value, string $tenant = self::DEFAULT_TENANT): void
     {
         DB::table('app_settings')->updateOrInsert(
-            ['key' => $key],
+            ['tenant' => $tenant, 'key' => $key],
             ['value' => $value, 'updated_at' => now()]
         );
     }

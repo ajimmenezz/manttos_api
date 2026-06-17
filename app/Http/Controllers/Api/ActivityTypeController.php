@@ -104,9 +104,20 @@ class ActivityTypeController extends Controller
             'field_key'    => ['required', 'string', 'max:60', 'regex:/^[a-z][a-z0-9_]*$/'],
             'field_type'   => 'required|in:' . implode(',', ActivityTypeField::FIELD_TYPES),
             'catalog_type' => 'nullable|string|max:60',
+            'legend_text'  => 'nullable|string|max:5000|required_if:field_type,leyenda',
+            'rules'        => 'nullable|array',
             'is_required'  => 'boolean',
             'max_length'   => 'nullable|integer|min:1|max:5000',
         ]);
+
+        // Una leyenda es texto informativo no editable: nunca es obligatoria ni captura valor.
+        if ($data['field_type'] === 'leyenda') {
+            $data['is_required']  = false;
+            $data['catalog_type'] = null;
+            $data['max_length']   = null;
+        } else {
+            $data['legend_text'] = null;
+        }
 
         if (ActivityTypeField::where('activity_type_id', $activityTypeId)
             ->where('system_id', $systemId)
@@ -141,9 +152,20 @@ class ActivityTypeController extends Controller
             'label'        => 'required|string|max:100',
             'field_type'   => 'required|in:' . implode(',', ActivityTypeField::FIELD_TYPES),
             'catalog_type' => 'nullable|string|max:60',
+            'legend_text'  => 'nullable|string|max:5000|required_if:field_type,leyenda',
+            'rules'        => 'nullable|array',
             'is_required'  => 'boolean',
             'max_length'   => 'nullable|integer|min:1|max:5000',
         ]);
+
+        // Una leyenda es texto informativo no editable: nunca es obligatoria ni captura valor.
+        if ($data['field_type'] === 'leyenda') {
+            $data['is_required']  = false;
+            $data['catalog_type'] = null;
+            $data['max_length']   = null;
+        } else {
+            $data['legend_text'] = null;
+        }
 
         $field->update($data);
 

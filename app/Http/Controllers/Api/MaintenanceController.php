@@ -6,11 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Models\Catalog;
 use App\Models\Client;
 use App\Models\Maintenance;
+use App\Models\MaintenanceContractFile;
+use App\Models\MaintenanceContractFrequency;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class MaintenanceController extends Controller
 {
@@ -116,6 +120,7 @@ class MaintenanceController extends Controller
 
         $data = $request->validate([
             'catalog_id' => 'required|integer|exists:catalogs,id',
+            'type'       => 'nullable|in:' . implode(',', Maintenance::TYPES),
             'start_date' => 'required|date',
             'end_date'   => 'required|date|after_or_equal:start_date',
             'notes'      => 'nullable|string|max:1000',
@@ -170,6 +175,7 @@ class MaintenanceController extends Controller
         abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
 
         $data = $request->validate([
+            'type'       => 'nullable|in:' . implode(',', Maintenance::TYPES),
             'start_date' => 'required|date',
             'end_date'   => 'required|date|after_or_equal:start_date',
             'status'     => 'required|in:programado,en_curso,completado,cancelado',
@@ -191,6 +197,113 @@ class MaintenanceController extends Controller
         $maintenance->load('system');
 
         return response()->json(['message' => 'Mantenimiento actualizado.', 'maintenance' => $maintenance]);
+    }
+
+    // ── Frecuencias del contrato (override por mantenimiento) ─────────────────
+
+    /** Frecuencias definidas a nivel mantenimiento (contrato). */
+    public function frequencies(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.view'), 403);
+
+        return response()->json(
+            MaintenanceContractFrequency::where('maintenance_id', $maintenance->id)
+                ->get(['device_type_id', 'activity_type_id', 'period_value', 'period_unit'])
+        );
+    }
+
+    /** Reemplaza (sync) las frecuencias del mantenimiento. */
+    public function syncFrequencies(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
+
+        $data = $request->validate([
+            'frequencies'                    => 'present|array',
+            'frequencies.*.device_type_id'   => 'required|integer|exists:catalogs,id',
+            'frequencies.*.activity_type_id' => 'required|integer|exists:catalogs,id',
+            'frequencies.*.period_unit'      => 'required|in:days,months,years,as_needed',
+            'frequencies.*.period_value'     => 'nullable|integer|min:1|max:9999|required_unless:frequencies.*.period_unit,as_needed',
+        ]);
+
+        $system = Catalog::findOrFail($maintenance->catalog_id);
+        $validDeviceTypes   = $system->deviceTypes()->pluck('catalogs.id')->all();
+        $validActivityTypes = $system->activityTypes()->pluck('catalogs.id')->all();
+
+        DB::transaction(function () use ($maintenance, $data, $validDeviceTypes, $validActivityTypes) {
+            MaintenanceContractFrequency::where('maintenance_id', $maintenance->id)->delete();
+
+            foreach ($data['frequencies'] as $row) {
+                if (! in_array((int) $row['device_type_id'], $validDeviceTypes, true)) continue;
+                if (! in_array((int) $row['activity_type_id'], $validActivityTypes, true)) continue;
+
+                MaintenanceContractFrequency::create([
+                    'maintenance_id'   => $maintenance->id,
+                    'device_type_id'   => $row['device_type_id'],
+                    'activity_type_id' => $row['activity_type_id'],
+                    'period_value'     => $row['period_unit'] === 'as_needed' ? null : $row['period_value'],
+                    'period_unit'      => $row['period_unit'],
+                ]);
+            }
+        });
+
+        return response()->json(['message' => 'Frecuencias del contrato actualizadas.']);
+    }
+
+    // ── Archivos de contrato (referencia) ─────────────────────────────────────
+
+    public function contractFiles(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.view'), 403);
+
+        return response()->json(
+            MaintenanceContractFile::where('maintenance_id', $maintenance->id)
+                ->orderByDesc('id')
+                ->get(['id', 'name', 'path', 'mime', 'size', 'created_at'])
+        );
+    }
+
+    public function uploadContractFiles(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
+
+        $request->validate([
+            'files'   => 'required|array|min:1|max:20',
+            'files.*' => ['required', 'file', 'max:20480', 'mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png'],
+        ], [
+            'files.*.max'   => 'Cada archivo no puede superar 20 MB.',
+            'files.*.mimes' => 'Formatos permitidos: PDF, Word, Excel o imágenes.',
+        ]);
+
+        $created = [];
+        foreach ($request->file('files') as $file) {
+            $ext  = strtolower($file->getClientOriginalExtension());
+            $name = Str::uuid()->toString() . ($ext ? ".{$ext}" : '');
+            $path = $file->storeAs('contract-files', $name, 'public');
+
+            $created[] = MaintenanceContractFile::create([
+                'maintenance_id' => $maintenance->id,
+                'name'           => $file->getClientOriginalName(),
+                'path'           => $path,
+                'mime'           => $file->getClientMimeType(),
+                'size'           => $file->getSize(),
+                'uploaded_by'    => $request->user()->id,
+            ]);
+        }
+
+        return response()->json(['message' => 'Archivos subidos.', 'files' => $created], 201);
+    }
+
+    public function deleteContractFile(Request $request, Maintenance $maintenance, MaintenanceContractFile $file): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
+        abort_unless($file->maintenance_id === $maintenance->id, 404);
+
+        if (Storage::disk('public')->exists($file->path)) {
+            Storage::disk('public')->delete($file->path);
+        }
+        $file->delete();
+
+        return response()->json(['message' => 'Archivo eliminado.']);
     }
 
     // ── Mantenimientos en el alcance del usuario ──────────────────────────────
@@ -290,6 +403,7 @@ class MaintenanceController extends Controller
         $data = $request->validate([
             'site_id'    => 'required|integer|exists:sites,id',
             'catalog_id' => 'required|integer|exists:catalogs,id',
+            'type'       => 'nullable|in:' . implode(',', Maintenance::TYPES),
             'start_date' => 'required|date',
             'end_date'   => 'required|date|after_or_equal:start_date',
             'notes'      => 'nullable|string|max:1000',
@@ -328,6 +442,7 @@ class MaintenanceController extends Controller
         $maintenance = Maintenance::create([
             'site_id'    => $site->id,
             'catalog_id' => $data['catalog_id'],
+            'type'       => $data['type'] ?? 'normal',
             'start_date' => $data['start_date'],
             'end_date'   => $data['end_date'],
             'notes'      => $data['notes'] ?? null,

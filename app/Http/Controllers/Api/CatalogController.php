@@ -56,8 +56,9 @@ class CatalogController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'type'  => 'required|string|in:' . implode(',', self::VALID_TYPES),
-            'label' => 'required|string|max:100',
+            'type'         => 'required|string|in:' . implode(',', self::VALID_TYPES),
+            'label'        => 'required|string|max:100',
+            'nomenclatura' => 'nullable|string|max:20',
         ]);
 
         if (Catalog::where('type', $request->type)->where('label', $request->label)->exists()) {
@@ -65,9 +66,10 @@ class CatalogController extends Controller
         }
 
         $catalog = Catalog::create([
-            'type'      => $request->type,
-            'label'     => $request->label,
-            'is_active' => true,
+            'type'         => $request->type,
+            'label'        => $request->label,
+            'nomenclatura' => $request->type === Catalog::TYPE_DEVICE_TYPE ? $request->nomenclatura : null,
+            'is_active'    => true,
         ]);
 
         return response()->json(['message' => 'Elemento creado.', 'catalog' => $catalog], 201);
@@ -76,7 +78,8 @@ class CatalogController extends Controller
     public function update(Request $request, Catalog $catalog): JsonResponse
     {
         $request->validate([
-            'label' => 'required|string|max:100',
+            'label'        => 'required|string|max:100',
+            'nomenclatura' => 'nullable|string|max:20',
         ]);
 
         if (
@@ -88,7 +91,11 @@ class CatalogController extends Controller
             return response()->json(['message' => 'Ya existe un elemento con ese nombre.'], 422);
         }
 
-        $catalog->update(['label' => $request->label]);
+        $data = ['label' => $request->label];
+        if ($catalog->type === Catalog::TYPE_DEVICE_TYPE) {
+            $data['nomenclatura'] = $request->nomenclatura;
+        }
+        $catalog->update($data);
 
         return response()->json(['message' => 'Elemento actualizado.', 'catalog' => $catalog]);
     }

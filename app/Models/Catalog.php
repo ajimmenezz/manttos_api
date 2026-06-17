@@ -7,7 +7,7 @@ use App\Models\ActivityTypeField;
 
 class Catalog extends Model
 {
-    protected $fillable = ['type', 'label', 'sort_order', 'is_active'];
+    protected $fillable = ['type', 'label', 'nomenclatura', 'sort_order', 'is_active'];
 
     protected function casts(): array
     {
@@ -82,6 +82,17 @@ class Catalog extends Model
             'activity_type_systems',
             'activity_type_id',
             'system_id'
+        );
+    }
+
+    /** Tipos de actividad asociados a este sistema (pivot inverso activity_type_systems) */
+    public function activityTypes()
+    {
+        return $this->belongsToMany(
+            Catalog::class,
+            'activity_type_systems',
+            'system_id',
+            'activity_type_id'
         );
     }
 

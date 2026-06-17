@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class SystemField extends Model
 {
-    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'image'];
+    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'image', 'did'];
 
     protected $fillable = [
         'catalog_id',
@@ -15,6 +15,7 @@ class SystemField extends Model
         'field_key',
         'field_type',
         'catalog_type',
+        'config',
         'is_required',
         'max_length',
         'sort_order',
@@ -33,6 +34,7 @@ class SystemField extends Model
             'show_in_bitacora'  => 'boolean',
             'max_length'        => 'integer',
             'sort_order'        => 'integer',
+            'config'            => 'array',
         ];
     }
 
