@@ -421,7 +421,7 @@ class MaintenanceDashboardController extends Controller
     {
         $activityFields = ActivityTypeField::whereIn('activity_type_id', $activityTypes->pluck('id'))
             ->where('system_id', $systemId)
-            ->whereIn('field_type', ['boolean', 'list'])
+            ->whereIn('field_type', ['boolean', 'list', 'scale'])
             ->where('is_active', true)
             ->get(['id', 'activity_type_id', 'label', 'field_key', 'field_type']);
 
@@ -439,7 +439,7 @@ class MaintenanceDashboardController extends Controller
                     'field_key' => $field->field_key, 'label' => $field->label, 'activity_type' => $typeName,
                     'type' => 'boolean', 'yes' => $yes, 'no' => $no, 'yes_pct' => round($yes / ($yes + $no) * 100, 1),
                 ];
-            } elseif ($field->field_type === 'list') {
+            } elseif ($field->field_type === 'list' || $field->field_type === 'scale') {
                 $dist = [];
                 foreach ($typeActivities as $act) {
                     $val = $act->field_values[$field->field_key] ?? null;

@@ -106,15 +106,22 @@ class ActivityTypeController extends Controller
             'catalog_type' => 'nullable|string|max:60',
             'legend_text'  => 'nullable|string|max:5000|required_if:field_type,leyenda',
             'rules'        => 'nullable|array',
+            'visibility'   => 'nullable|array',
+            'config'       => 'nullable|array',
             'is_required'  => 'boolean',
             'max_length'   => 'nullable|integer|min:1|max:5000',
         ]);
 
         // Una leyenda es texto informativo no editable: nunca es obligatoria ni captura valor.
+        // Sí puede tener condición de visibilidad (mostrarse solo si aplica), pero la
+        // condición de obligatoriedad no tiene sentido para ella.
         if ($data['field_type'] === 'leyenda') {
             $data['is_required']  = false;
             $data['catalog_type'] = null;
             $data['max_length']   = null;
+            if (isset($data['visibility']) && is_array($data['visibility'])) {
+                unset($data['visibility']['requireWhen']);
+            }
         } else {
             $data['legend_text'] = null;
         }
@@ -154,15 +161,22 @@ class ActivityTypeController extends Controller
             'catalog_type' => 'nullable|string|max:60',
             'legend_text'  => 'nullable|string|max:5000|required_if:field_type,leyenda',
             'rules'        => 'nullable|array',
+            'visibility'   => 'nullable|array',
+            'config'       => 'nullable|array',
             'is_required'  => 'boolean',
             'max_length'   => 'nullable|integer|min:1|max:5000',
         ]);
 
         // Una leyenda es texto informativo no editable: nunca es obligatoria ni captura valor.
+        // Sí puede tener condición de visibilidad (mostrarse solo si aplica), pero la
+        // condición de obligatoriedad no tiene sentido para ella.
         if ($data['field_type'] === 'leyenda') {
             $data['is_required']  = false;
             $data['catalog_type'] = null;
             $data['max_length']   = null;
+            if (isset($data['visibility']) && is_array($data['visibility'])) {
+                unset($data['visibility']['requireWhen']);
+            }
         } else {
             $data['legend_text'] = null;
         }

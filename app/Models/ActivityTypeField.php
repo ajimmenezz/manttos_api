@@ -6,7 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class ActivityTypeField extends Model
 {
-    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'image', 'leyenda'];
+    public const FIELD_TYPES = [
+        'text', 'textarea', 'number', 'currency', 'scale',
+        'date', 'time', 'datetime', 'boolean', 'list', 'multiselect',
+        'image', 'signature', 'leyenda',
+    ];
 
     protected $fillable = [
         'activity_type_id',
@@ -17,6 +21,8 @@ class ActivityTypeField extends Model
         'catalog_type',
         'legend_text',
         'rules',
+        'visibility',
+        'config',
         'is_required',
         'max_length',
         'sort_order',
@@ -33,6 +39,8 @@ class ActivityTypeField extends Model
             'max_length'       => 'integer',
             'sort_order'       => 'integer',
             'rules'            => 'array',
+            'visibility'       => 'array',
+            'config'           => 'array',
         ];
     }
 
