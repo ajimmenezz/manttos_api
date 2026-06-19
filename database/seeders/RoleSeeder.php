@@ -38,12 +38,6 @@ class RoleSeeder extends Seeder
             'maintenances.view', 'maintenances.create',
         ]);
 
-        // Técnico: solo perfil propio
-        $tecnico = Role::firstOrCreate(['name' => 'tecnico', 'guard_name' => 'web']);
-        $tecnico->syncPermissions([
-            'profile.view', 'profile.edit',
-        ]);
-
         // Ingeniero: ejecuta mantenimientos asignados y registra actividades por dispositivo
         $ingeniero = Role::firstOrCreate(['name' => 'ingeniero', 'guard_name' => 'web']);
         $ingeniero->syncPermissions([
