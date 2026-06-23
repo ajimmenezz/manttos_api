@@ -77,6 +77,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Sitios — lista plana (acceso del usuario actual) + anidados en cliente
     Route::get('/sites', [SiteController::class, 'all']);
+    // Directorios — lista plana scopeada por acceso del usuario (Operaciones → Directorios)
+    Route::get('/directories', [DirectoryController::class, 'all']);
     // Compact antes del apiResource para evitar que {site} capture la literal "compact"
     Route::get('/clients/{client}/sites/compact', [SiteController::class, 'compact']);
     Route::apiResource('/clients/{client}/sites', SiteController::class);

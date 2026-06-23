@@ -25,6 +25,58 @@ class DirectoryController extends Controller
         abort(403, 'No tienes acceso a este sitio.');
     }
 
+    /**
+     * Lista plana de todos los directorios accesibles por el usuario
+     * (sección Operaciones → Directorios). Mismo scope por rol que los sitios:
+     * cada usuario solo ve los directorios de los sitios a los que tiene acceso.
+     */
+    public function all(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $query = Directory::query()
+            ->join('sites', 'directories.site_id', '=', 'sites.id')
+            ->join('clients', 'sites.client_id', '=', 'clients.id')
+            ->with(['system', 'site.client'])
+            ->withCount('devices')
+            ->select('directories.*')
+            ->when($request->filled('is_active'), fn ($q) => $q->where('directories.is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN)))
+            ->orderBy('clients.name')
+            ->orderBy('sites.name')
+            ->orderBy('directories.id');
+
+        if ($user->hasAnyRole(['superadmin', 'admin'])) {
+            // sin restricción — ven todo
+        } elseif ($user->hasRole('admin-cliente')) {
+            $clientIds = $user->clientsAsAdmin()->pluck('clients.id');
+            $query->whereIn('sites.client_id', $clientIds);
+        } elseif ($user->hasRole('admin-sitio')) {
+            $siteIds = $user->sitesAsAdmin()->pluck('sites.id');
+            $query->whereIn('directories.site_id', $siteIds);
+        } else {
+            // ingeniero / técnico u otros: no gestionan directorios
+            return response()->json(['data' => [], 'total' => 0]);
+        }
+
+        $paginated = $query->paginate($request->per_page ?? 1000);
+
+        $paginated->getCollection()->transform(fn (Directory $d) => [
+            'id'            => $d->id,
+            'client_id'     => $d->site?->client_id,
+            'client_name'   => $d->site?->client?->name,
+            'site_id'       => $d->site_id,
+            'site_name'     => $d->site?->name,
+            'site_code'     => $d->site?->code,
+            'catalog_id'    => $d->catalog_id,
+            'system_label'  => $d->system?->label,
+            'display_name'  => $d->display_name,
+            'devices_count' => $d->devices_count ?? 0,
+            'is_active'     => $d->is_active,
+        ]);
+
+        return response()->json($paginated);
+    }
+
     public function index(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
