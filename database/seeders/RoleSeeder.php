@@ -23,6 +23,7 @@ class RoleSeeder extends Seeder
             'site-admins.view', 'site-admins.assign', 'site-admins.remove',
             'directories.view',
             'devices.view',
+            'floor-plans.view', 'floor-plans.manage',
             'maintenances.view', 'maintenances.create',
         ]);
 
@@ -35,6 +36,7 @@ class RoleSeeder extends Seeder
             'site-admins.view',
             'directories.view', 'directories.create', 'directories.edit', 'directories.toggle-status',
             'devices.view', 'devices.create', 'devices.edit', 'devices.toggle-status',
+            'floor-plans.view', 'floor-plans.manage',
             'maintenances.view', 'maintenances.create',
         ]);
 
@@ -44,6 +46,7 @@ class RoleSeeder extends Seeder
             'profile.view', 'profile.edit',
             'maintenances.view',
             'maintenances.record-activity',
+            'floor-plans.view',
         ]);
 
         // Admin: todos los permisos excepto config.manage (reservado a superadmin)

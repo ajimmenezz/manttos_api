@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\MaintenanceController;
 use App\Http\Controllers\Api\DeviceImportExportController;
 use App\Http\Controllers\Api\DirectoryController;
+use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
@@ -154,6 +155,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/media/upload',  [MediaController::class, 'upload']);
     Route::delete('/media',       [MediaController::class, 'destroy']);
 
+    // Planos del sitio (imagen compartida) + sembrado de dispositivos por sistema
+    $planBase = '/clients/{client}/sites/{site}/floor-plans';
+    Route::get(   $planBase,                                  [FloorPlanController::class, 'index']);
+    Route::post(  $planBase,                                  [FloorPlanController::class, 'store']);
+    // estática ANTES de la dinámica {floorPlan} para evitar colisión
+    Route::get(   "{$planBase}/placed-devices",              [FloorPlanController::class, 'placedDevices']);
+    Route::get(   "{$planBase}/{floorPlan}",                  [FloorPlanController::class, 'show']);
+    Route::put(   "{$planBase}/{floorPlan}",                  [FloorPlanController::class, 'update']);
+    Route::delete("{$planBase}/{floorPlan}",                  [FloorPlanController::class, 'destroy']);
+    Route::post(  "{$planBase}/{floorPlan}/toggle-status",    [FloorPlanController::class, 'toggleStatus']);
+    Route::post(  "{$planBase}/{floorPlan}/placements",       [FloorPlanController::class, 'savePlacements']);
+    Route::delete("{$planBase}/{floorPlan}/placements",       [FloorPlanController::class, 'clearPlacements']);
+    Route::delete("{$planBase}/{floorPlan}/placements/{device}", [FloorPlanController::class, 'deletePlacement']);
+
     // Tipos de actividad — campos por sistema + asociación a sistemas
     Route::prefix('/activity-types/{activityType}/systems/{system}')->group(function () {
         Route::get('/fields',                        [ActivityTypeController::class, 'fields']);
@@ -190,6 +205,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/activity-types',   [MaintenanceActivityController::class, 'activityTypes']);
     Route::get('/maintenances/{maintenance}/activity-devices', [MaintenanceActivityController::class, 'devices']);
     Route::get('/maintenances/{maintenance}/activity-counts',  [MaintenanceActivityController::class, 'activityCounts']);
+    Route::get('/maintenances/{maintenance}/floor-plans',      [MaintenanceActivityController::class, 'floorPlans']);
     Route::get('/maintenances/{maintenance}/log',              [MaintenanceActivityController::class, 'log']);
     Route::post('/maintenances/{maintenance}/activities',                [MaintenanceActivityController::class, 'store']);
     Route::put('/maintenances/{maintenance}/activities/{activity}',     [MaintenanceActivityController::class, 'update']);

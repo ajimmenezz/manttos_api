@@ -45,4 +45,9 @@ class Device extends Model
     {
         return $this->hasMany(DeviceFieldValue::class);
     }
+
+    public function placements()
+    {
+        return $this->hasMany(DevicePlacement::class);
+    }
 }

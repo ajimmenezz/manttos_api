@@ -49,6 +49,11 @@ class Site extends Model
         return $this->hasMany(Directory::class);
     }
 
+    public function floorPlans()
+    {
+        return $this->hasMany(FloorPlan::class);
+    }
+
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
