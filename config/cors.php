@@ -21,7 +21,8 @@ return [
 
     'allowed_origins' => ['http://localhost:3000', 'https://mantenimientos.siccobsolutions.com.mx'],
 
-    'allowed_origins_patterns' => [],
+    // Desarrollo local: cualquier puerto de localhost/127.0.0.1 (Next puede arrancar en 3001, etc.)
+    'allowed_origins_patterns' => ['#^http://(localhost|127\.0\.0\.1)(:\d+)?$#'],
 
     'allowed_headers' => ['*'],
 

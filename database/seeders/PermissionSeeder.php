@@ -79,6 +79,10 @@ class PermissionSeeder extends Seeder
             'devices.edit',
             'devices.toggle-status',
 
+            // Planos (floor plans) — imagen del sitio + sembrado de dispositivos
+            'floor-plans.view',
+            'floor-plans.manage',
+
             // Mantenimientos
             'maintenances.view',
             'maintenances.create',

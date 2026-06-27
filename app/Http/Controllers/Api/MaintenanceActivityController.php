@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Catalog;
 use App\Models\Device;
 use App\Models\Directory;
+use App\Models\FloorPlan;
 use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
 use Illuminate\Http\JsonResponse;
@@ -104,6 +105,49 @@ class MaintenanceActivityController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    /** GET /maintenances/{maintenance}/floor-plans
+     *  Planos activos del sitio + sembrado de los dispositivos de ESTE sistema
+     *  (solo lectura). El frontend cruza con activity-counts para colorear.
+     */
+    public function floorPlans(Maintenance $maintenance): JsonResponse
+    {
+        $this->authorizeAccess($maintenance);
+
+        // dispositivos del directorio (sistema) de este mantenimiento
+        $deviceIds = Device::whereHas('directory', fn ($q) => $q
+            ->where('site_id', $maintenance->site_id)
+            ->where('catalog_id', $maintenance->catalog_id)
+        )->pluck('id');
+
+        $plans = FloorPlan::where('site_id', $maintenance->site_id)
+            ->where('is_active', true)
+            ->with(['placements' => fn ($q) => $q
+                ->whereIn('device_id', $deviceIds)
+                ->with('device:id,name,device_type,status,custom_fields'),
+            ])
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (FloorPlan $p) => [
+                'id'           => $p->id,
+                'name'         => $p->name,
+                'image_url'    => $p->image_url,
+                'image_width'  => $p->image_width,
+                'image_height' => $p->image_height,
+                'placements'   => $p->placements->map(fn ($pl) => [
+                    'device_id'    => $pl->device_id,
+                    'x'            => (float) $pl->x,
+                    'y'            => (float) $pl->y,
+                    'name'         => $pl->device?->name,
+                    'device_type'  => $pl->device?->device_type,
+                    'status'       => $pl->device?->status,
+                    'custom_fields'=> $pl->device?->custom_fields,
+                ])->values(),
+            ]);
+
+        return response()->json($plans);
     }
 
     /** POST /maintenances/{maintenance}/activities */
