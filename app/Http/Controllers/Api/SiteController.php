@@ -32,6 +32,17 @@ class SiteController extends Controller
             return $query->whereIn('sites.id', $assignedIds);
         }
 
+        if ($user->hasRole('ingeniero')) {
+            // Ingeniero del cliente → todos sus sitios; si no, solo los sitios asignados.
+            if ($user->clientsAsEngineer()->where('clients.id', $client->id)->exists()) {
+                return $query;
+            }
+            $assignedIds = $user->sitesAsEngineer()
+                ->where('sites.client_id', $client->id)
+                ->pluck('sites.id');
+            return $query->whereIn('sites.id', $assignedIds);
+        }
+
         return $query->whereRaw('1 = 0');
     }
 

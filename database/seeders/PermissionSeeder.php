@@ -63,6 +63,16 @@ class PermissionSeeder extends Seeder
             'site-admins.assign',
             'site-admins.remove',
 
+            // Ingenieros que atienden un cliente (→ todos sus sitios)
+            'client-engineers.view',
+            'client-engineers.assign',
+            'client-engineers.remove',
+
+            // Ingenieros que atienden un sitio específico
+            'site-engineers.view',
+            'site-engineers.assign',
+            'site-engineers.remove',
+
             // Configuración de sistemas (tipos de dispositivo + plantillas de campos)
             'system-config.view',
             'system-config.manage',
@@ -92,6 +102,14 @@ class PermissionSeeder extends Seeder
 
             // Actividades
             'activities.view-registration-date',
+
+            // Eventos (gestión de incidentes / solicitudes)
+            'events.view',
+            'events.create',
+            'events.fill-form',     // capturar el formulario dinámico del evento
+            'events.change-status',
+            'events.assign',        // fase 3
+            'events.manage',        // catálogos: tipos de evento + estados/flujos
 
             // Configuración del sistema
             'config.manage',

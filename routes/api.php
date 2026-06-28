@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\MaintenanceDashboardController;
 use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\ClientEngineerController;
 use App\Http\Controllers\Api\ClientUserController;
 use App\Http\Controllers\Api\ClientSystemFieldController;
 use App\Http\Controllers\Api\DeviceController;
@@ -17,12 +18,17 @@ use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\MaintenanceController;
 use App\Http\Controllers\Api\DeviceImportExportController;
 use App\Http\Controllers\Api\DirectoryController;
+use App\Http\Controllers\Api\EventController;
+use App\Http\Controllers\Api\EventDashboardController;
+use App\Http\Controllers\Api\EventTypeController;
+use App\Http\Controllers\Api\EventStatusController;
 use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SiteController;
+use App\Http\Controllers\Api\SiteEngineerController;
 use App\Http\Controllers\Api\SiteUserController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
@@ -90,6 +96,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/{client}/admins/candidates', [ClientUserController::class, 'candidates']);
     Route::post('/clients/{client}/admins', [ClientUserController::class, 'store']);
     Route::delete('/clients/{client}/admins/{user}', [ClientUserController::class, 'destroy']);
+
+    // Ingenieros que atienden al cliente (→ todos sus sitios)
+    Route::get('/clients/{client}/engineers', [ClientEngineerController::class, 'index']);
+    Route::get('/clients/{client}/engineers/candidates', [ClientEngineerController::class, 'candidates']);
+    Route::post('/clients/{client}/engineers', [ClientEngineerController::class, 'store']);
+    Route::delete('/clients/{client}/engineers/{user}', [ClientEngineerController::class, 'destroy']);
 
     // Plantillas personalizadas por cliente (solo superadmin)
     Route::get('/clients/{client}/system-templates', [ClientSystemFieldController::class, 'systemsWithTemplates']);
@@ -183,6 +195,44 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::get('/activity-types/{activityType}/systems', [ActivityTypeController::class, 'systemsWithFields']);
 
+    // ─── Eventos: catálogo de TIPOS de evento + formulario por sistema ───
+    Route::get('/event-types',                          [EventTypeController::class, 'index']);
+    Route::post('/event-types',                         [EventTypeController::class, 'store']);
+    Route::get('/event-types/{eventType}',              [EventTypeController::class, 'show']);
+    Route::put('/event-types/{eventType}',              [EventTypeController::class, 'update']);
+    Route::post('/event-types/{eventType}/toggle-status', [EventTypeController::class, 'toggleStatus']);
+    Route::get('/event-types/{eventType}/systems',      [EventTypeController::class, 'systemsWithFields']);
+    Route::get('/event-types/{eventType}/transitions',  [EventTypeController::class, 'transitions']);
+    Route::post('/event-types/{eventType}/transitions', [EventTypeController::class, 'setTransitions']);
+    Route::prefix('/event-types/{eventType}/systems/{system}')->group(function () {
+        Route::get('/fields',                       [EventTypeController::class, 'fields']);
+        Route::post('/fields',                      [EventTypeController::class, 'storeField']);
+        Route::post('/fields/reorder',              [EventTypeController::class, 'reorderFields']);
+        Route::put('/fields/{field}',               [EventTypeController::class, 'updateField']);
+        Route::post('/fields/{field}/toggle-status', [EventTypeController::class, 'toggleField']);
+        Route::delete('/fields/{field}',            [EventTypeController::class, 'destroyField']);
+        Route::post('/link',                        [EventTypeController::class, 'linkSystem']);
+        Route::delete('/link',                      [EventTypeController::class, 'unlinkSystem']);
+    });
+
+    // ─── Eventos: catálogo de ESTADOS + flujo general ───
+    Route::get('/event-statuses',                          [EventStatusController::class, 'index']);
+    Route::post('/event-statuses',                         [EventStatusController::class, 'store']);
+    Route::put('/event-statuses/{eventStatus}',            [EventStatusController::class, 'update']);
+    Route::post('/event-statuses/{eventStatus}/toggle-status', [EventStatusController::class, 'toggleStatus']);
+    Route::post('/event-statuses/reorder',                 [EventStatusController::class, 'reorder']);
+    Route::post('/event-statuses/transitions',             [EventStatusController::class, 'setTransitions']);
+
+    // ─── Eventos: operación (Operaciones → Eventos) ───
+    Route::get('/events',                 [EventController::class, 'index']);
+    Route::get('/events/form-fields',     [EventController::class, 'formFields']);  // antes del wildcard {event}
+    Route::get('/events/dashboard',       [EventDashboardController::class, 'show']); // antes del wildcard {event}
+    Route::get('/events/sync-bundle',     [EventController::class, 'syncBundle']);  // antes del wildcard {event}
+    Route::post('/events',                [EventController::class, 'store']);
+    Route::get('/events/{event}',         [EventController::class, 'show']);
+    Route::put('/events/{event}',         [EventController::class, 'update']);
+    Route::post('/events/{event}/status', [EventController::class, 'changeStatus']);
+
     // Vista consolidada de mantenimientos (scope por rol)
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);
     Route::post('/my-maintenances',         [MaintenanceController::class, 'quickCreate']);
@@ -231,6 +281,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/{client}/sites/{site}/admins/candidates', [SiteUserController::class, 'candidates']);
     Route::post('/clients/{client}/sites/{site}/admins', [SiteUserController::class, 'store']);
     Route::delete('/clients/{client}/sites/{site}/admins/{user}', [SiteUserController::class, 'destroy']);
+
+    // Ingenieros que atienden el sitio
+    Route::get('/clients/{client}/sites/{site}/engineers', [SiteEngineerController::class, 'index']);
+    Route::get('/clients/{client}/sites/{site}/engineers/candidates', [SiteEngineerController::class, 'candidates']);
+    Route::post('/clients/{client}/sites/{site}/engineers', [SiteEngineerController::class, 'store']);
+    Route::delete('/clients/{client}/sites/{site}/engineers/{user}', [SiteEngineerController::class, 'destroy']);
 });
 
 /*

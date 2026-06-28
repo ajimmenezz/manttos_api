@@ -44,6 +44,12 @@ class Site extends Model
         return $this->belongsToMany(User::class, 'site_user')->withTimestamps();
     }
 
+    /** Ingenieros que pueden atender este sitio. */
+    public function engineers()
+    {
+        return $this->belongsToMany(User::class, 'site_engineers')->withTimestamps();
+    }
+
     public function directories()
     {
         return $this->hasMany(Directory::class);

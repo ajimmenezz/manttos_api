@@ -22,6 +22,7 @@ class Catalog extends Model
     public const TYPE_SYSTEM        = 'system';
     public const TYPE_DEVICE_TYPE   = 'device_type';
     public const TYPE_ACTIVITY_TYPE = 'activity_type';
+    public const TYPE_EVENT_STATUS_CATEGORY = 'event_status_category';
 
     public static function types(): array
     {
@@ -31,6 +32,7 @@ class Catalog extends Model
             self::TYPE_SYSTEM        => 'Sistemas',
             self::TYPE_DEVICE_TYPE   => 'Tipos de dispositivo',
             self::TYPE_ACTIVITY_TYPE => 'Tipos de actividad',
+            self::TYPE_EVENT_STATUS_CATEGORY => 'Categorías de estado de evento',
         ];
     }
 

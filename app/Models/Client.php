@@ -21,12 +21,14 @@ class Client extends Model
         'is_active',
         'notes',
         'created_by',
+        'event_folio_config',
     ];
 
     protected function casts(): array
     {
         return [
-            'is_active' => 'boolean',
+            'is_active'          => 'boolean',
+            'event_folio_config' => 'array',
         ];
     }
 
@@ -38,6 +40,12 @@ class Client extends Model
     public function admins()
     {
         return $this->belongsToMany(User::class, 'client_user')->withTimestamps();
+    }
+
+    /** Ingenieros que pueden atender a este cliente (→ todos sus sitios). */
+    public function engineers()
+    {
+        return $this->belongsToMany(User::class, 'client_engineers')->withTimestamps();
     }
 
     public function creator()

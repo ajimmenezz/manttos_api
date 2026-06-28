@@ -55,6 +55,18 @@ class User extends Authenticatable
         return $this->belongsToMany(Site::class, 'site_user')->withTimestamps();
     }
 
+    /** Clientes que este ingeniero puede atender (→ todos sus sitios). */
+    public function clientsAsEngineer()
+    {
+        return $this->belongsToMany(Client::class, 'client_engineers')->withTimestamps();
+    }
+
+    /** Sitios específicos que este ingeniero puede atender. */
+    public function sitesAsEngineer()
+    {
+        return $this->belongsToMany(Site::class, 'site_engineers')->withTimestamps();
+    }
+
     /**
      * Pueden emitir llaves de API todos los roles por debajo de admin
      * (admin-cliente, admin-sitio, ingeniero, técnico). Nunca superadmin ni admin:

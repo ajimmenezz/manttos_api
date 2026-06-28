@@ -33,6 +33,13 @@ class ClientController extends Controller
             return $query->whereIn('id', $clientIds);
         }
 
+        if ($user->hasRole('ingeniero')) {
+            // Clientes donde atiende: asignado al cliente ∪ cliente de un sitio asignado.
+            $direct  = $user->clientsAsEngineer()->pluck('clients.id');
+            $viaSites = $user->sitesAsEngineer()->pluck('sites.client_id');
+            return $query->whereIn('id', $direct->merge($viaSites)->unique());
+        }
+
         // Cualquier otro rol no ve clientes
         return $query->whereRaw('1 = 0');
     }
@@ -86,6 +93,12 @@ class ClientController extends Controller
             'rfc'        => 'nullable|string|max:13',
             'industry'   => 'nullable|string|max:100',
             'notes'      => 'nullable|string',
+            // Nomenclatura de folio de eventos por cliente
+            'event_folio_config'               => 'nullable|array',
+            'event_folio_config.prefix'        => 'nullable|string|max:12',
+            'event_folio_config.include_year'  => 'boolean',
+            'event_folio_config.pad'           => 'nullable|integer|min:1|max:8',
+            'event_folio_config.reset_yearly'  => 'boolean',
         ]);
 
         $client->update($data);

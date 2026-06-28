@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 
 class CatalogController extends Controller
 {
-    private const VALID_TYPES = ['industry', 'site_type', 'system', 'device_type', 'activity_type'];
+    private const VALID_TYPES = ['industry', 'site_type', 'system', 'device_type', 'activity_type', 'event_status_category'];
 
     /** Lista paginada con búsqueda, filtro de estado y ordenamiento por columna */
     public function index(Request $request): JsonResponse
@@ -102,6 +102,16 @@ class CatalogController extends Controller
 
     public function toggleStatus(Catalog $catalog): JsonResponse
     {
+        // Una categoría de estado de evento no se puede desactivar si tiene estados asociados.
+        if ($catalog->is_active
+            && $catalog->type === Catalog::TYPE_EVENT_STATUS_CATEGORY
+            && \App\Models\EventStatus::where('category_id', $catalog->id)->exists()
+        ) {
+            return response()->json([
+                'message' => 'No se puede desactivar la categoría: tiene estados asociados. Reasigna esos estados primero.',
+            ], 422);
+        }
+
         $catalog->update(['is_active' => ! $catalog->is_active]);
         $label = $catalog->is_active ? 'activado' : 'desactivado';
 
