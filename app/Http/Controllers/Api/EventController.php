@@ -34,7 +34,7 @@ class EventController extends Controller
         abort_unless($request->user()->can('events.view'), 403);
 
         $query = Event::query()
-            ->with(['eventType:id,label,nature,color', 'system:id,label', 'status:id,key,label,color',
+            ->with(['eventType:id,label,nature,color', 'system:id,label', 'status:id,key,label,color,is_terminal',
                     'site:id,name,client_id', 'client:id,name,short_name', 'creator:id,name', 'assignee:id,name'])
             ->when($request->filled('client_id'),     fn ($q) => $q->where('events.client_id', $request->client_id))
             ->when($request->filled('site_id'),       fn ($q) => $q->where('events.site_id', $request->site_id))
@@ -68,7 +68,18 @@ class EventController extends Controller
             'occurred_at'   => 'nullable|date',
             // Captura rica opcional (la app móvil del ingeniero documenta el formulario al alta).
             'field_values'  => 'nullable|array',
+            // Llave de idempotencia generada por el cliente (evita duplicados si se reintenta el alta).
+            'client_uuid'   => 'nullable|string|max:64',
         ]);
+
+        // Idempotencia: si ya existe un evento con este client_uuid, devolverlo en
+        // vez de crear otro (la app pudo reenviar tras un corte de red / cierre).
+        if (! empty($data['client_uuid'])) {
+            $existing = Event::where('client_uuid', $data['client_uuid'])->first();
+            if ($existing) {
+                return response()->json(['message' => 'Evento ya registrado.', 'event' => $existing->fresh(), 'folio' => $existing->folio], 200);
+            }
+        }
 
         $site = Site::findOrFail($data['site_id']);
         abort_unless($this->userCanUseSite($request, $site), 403, 'No tienes acceso a este sitio.');
@@ -86,6 +97,7 @@ class EventController extends Controller
         $event = DB::transaction(function () use ($data, $site, $type, $status, $user, $hasForm) {
             $event = Event::create([
                 'folio'         => EventFolio::next($site->client),
+                'client_uuid'   => $data['client_uuid'] ?? null,
                 'client_id'     => $site->client_id,
                 'site_id'       => $site->id,
                 'system_id'     => $data['system_id'],
@@ -347,7 +359,7 @@ class EventController extends Controller
         }
 
         $statuses = EventStatus::where('is_active', true)->orderBy('sort_order')
-            ->get(['id', 'key', 'label', 'color', 'is_initial']);
+            ->get(['id', 'key', 'label', 'color', 'is_initial', 'is_terminal']);
 
         return response()->json([
             'sites'             => $sitesOut,

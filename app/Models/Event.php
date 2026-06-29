@@ -10,6 +10,7 @@ class Event extends Model
 
     protected $fillable = [
         'folio',
+        'client_uuid',
         'client_id',
         'site_id',
         'system_id',
