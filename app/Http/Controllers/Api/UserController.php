@@ -150,7 +150,7 @@ class UserController extends Controller
         if (DB::table('events')->where('created_by', $id)->orWhere('assigned_to', $id)->exists()) {
             $labels[] = 'eventos';
         }
-        if (DB::table('event_history')->where('user_id', $id)->exists()) {
+        if (DB::table('event_status_history')->where('user_id', $id)->exists()) {
             $labels[] = 'historial de eventos';
         }
         if (DB::table('device_schedules')->where('created_by', $id)->exists()) {
