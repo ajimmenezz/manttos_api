@@ -410,6 +410,12 @@ class DeviceImportExportController extends Controller
         foreach ($fields as $field) {
             $rawValue = $rowData[$field->label] ?? null;
 
+            // DID en modo patrón: se auto-computa desde otros campos tras el loop,
+            // no se captura manualmente ni se valida como obligatorio.
+            if ($field->field_type === 'did' && (($field->config['did_mode'] ?? 'text') === 'pattern')) {
+                continue;
+            }
+
             if ($rawValue === null || (string) $rawValue === '') {
                 if ($field->is_required) {
                     $errors[] = "'{$field->label}' es obligatorio";
@@ -460,6 +466,9 @@ class DeviceImportExportController extends Controller
 
             $customFields[$field->field_key] = $value;
         }
+
+        // Computa/normaliza los campos DID (patrón, número con relleno, texto) igual que el formulario.
+        $customFields = $this->resolveDidCustomFields($customFields, $fields);
 
         return [$customFields, $errors, $newCatalogValues];
     }
