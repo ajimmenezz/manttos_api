@@ -17,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Support\EventFolio;
+use App\Support\EventSla;
 
 class EventController extends Controller
 {
@@ -45,9 +46,8 @@ class EventController extends Controller
             ->when($request->filled('search'),        fn ($q) => $q->where(fn ($s) =>
                 $s->where('events.folio', 'ilike', "%{$request->search}%")
                   ->orWhere('events.description', 'ilike', "%{$request->search}%")))
-            // Oculta eventos cuyo cliente o sitio esté archivado (cascada lógica).
-            ->whereHas('client')->whereHas('site')
             ->orderByDesc('events.created_at');
+        // La exclusión de clientes/sitios archivados la aplica scopeEvents() (trait).
 
         $this->scopeEvents($request, $query);
 
@@ -66,6 +66,9 @@ class EventController extends Controller
             'event_type_id' => 'required|exists:event_types,id',
             'device_id'     => 'nullable|exists:devices,id',
             'priority'      => 'nullable|in:' . implode(',', Event::PRIORITIES),
+            'impact'        => 'nullable|in:' . implode(',', Event::IMPACTS),
+            'urgency'       => 'nullable|in:' . implode(',', Event::URGENCIES),
+            'scheduled_attention_at' => 'nullable|date',
             'description'   => 'required|string|max:5000',
             'occurred_at'   => 'nullable|date',
             // Captura rica opcional (la app móvil del ingeniero documenta el formulario al alta).
@@ -88,6 +91,12 @@ class EventController extends Controller
 
         $type = EventType::findOrFail($data['event_type_id']);
 
+        // Prioridad = matriz Impacto×Urgencia (auto) salvo override manual explícito.
+        [$priority, $priorityAuto] = $this->resolvePriority($data, $type, $site->client_id);
+        $settings = EventSla::resolve($site->client_id);
+        $scheduledAt = (EventSla::isScheduled($priority, $settings) && ! empty($data['scheduled_attention_at']))
+            ? $data['scheduled_attention_at'] : null;
+
         // Por defecto el alta sólo registra la descripción → 'pendiente_captura'. Si el ingeniero
         // (events.fill-form) ya viene con el formulario documentado, arranca en 'en_progreso'.
         $hasForm = $user->can('events.fill-form') && ! empty($data['field_values']);
@@ -96,7 +105,7 @@ class EventController extends Controller
             ?? EventStatus::where('is_initial', true)->orderBy('sort_order')->first();
         abort_if(! $status, 422, 'No hay estados configurados.');
 
-        $event = DB::transaction(function () use ($data, $site, $type, $status, $user, $hasForm) {
+        $event = DB::transaction(function () use ($data, $site, $type, $status, $user, $hasForm, $priority, $priorityAuto, $scheduledAt) {
             $event = Event::create([
                 'folio'         => EventFolio::next($site->client),
                 'client_uuid'   => $data['client_uuid'] ?? null,
@@ -106,7 +115,11 @@ class EventController extends Controller
                 'event_type_id' => $type->id,
                 'device_id'     => $data['device_id'] ?? null,
                 'status_id'     => $status->id,
-                'priority'      => $data['priority'] ?? $type->default_priority,
+                'priority'      => $priority,
+                'impact'        => $data['impact'] ?? null,
+                'urgency'       => $data['urgency'] ?? null,
+                'priority_auto' => $priorityAuto,
+                'scheduled_attention_at' => $scheduledAt,
                 'description'   => $data['description'],
                 'field_values'  => $hasForm ? $data['field_values'] : null,
                 'created_by'    => $user->id,
@@ -141,6 +154,49 @@ class EventController extends Controller
         return false;
     }
 
+    /**
+     * Determina la prioridad de un evento nuevo y si fue automática.
+     * Prioridad = matriz Impacto×Urgencia (auto); si el usuario mandó una prioridad que
+     * no coincide con la derivada, es override manual; sin impacto/urgencia se usa la
+     * prioridad enviada o la del tipo.
+     *
+     * @return array{0:string,1:bool}  [priority, priority_auto]
+     */
+    private function resolvePriority(array $data, EventType $type, int $clientId): array
+    {
+        $settings = EventSla::resolve($clientId);
+        $derived  = EventSla::priorityFor($data['impact'] ?? null, $data['urgency'] ?? null, $settings);
+        $explicit = $data['priority'] ?? null;
+
+        if ($explicit && $derived && $explicit !== $derived) return [$explicit, false];
+        if ($derived)  return [$derived, true];
+        if ($explicit) return [$explicit, false];
+        return [$type->default_priority, false];
+    }
+
+    /** Contexto de SLA para el alta de un evento (según el cliente del sitio). */
+    public function slaContext(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('events.create'), 403);
+        $request->validate(['site_id' => 'required|exists:sites,id']);
+        $site = Site::findOrFail($request->site_id);
+
+        $settings = EventSla::resolve($site->client_id);
+        // scheduled por prioridad, para que el front sepa cuándo pedir fecha programada.
+        $scheduled = [];
+        foreach (Event::PRIORITIES as $p) {
+            $scheduled[$p] = EventSla::isScheduled($p, $settings);
+        }
+
+        return response()->json([
+            'impacts'    => Event::IMPACTS,
+            'urgencies'  => Event::URGENCIES,
+            'matrix'     => $settings['matrix'],
+            'scheduled'  => $scheduled,
+            'enabled'    => (bool) ($settings['enabled'] ?? true),
+        ]);
+    }
+
     // ─── Detalle ──────────────────────────────────────────────────
     public function show(Request $request, Event $event): JsonResponse
     {
@@ -148,7 +204,7 @@ class EventController extends Controller
 
         $event->load(['eventType', 'system:id,label', 'status', 'site:id,name,client_id',
             'client:id,name,short_name', 'device:id,device_name,device_type', 'creator:id,name', 'assignee:id,name',
-            'history.toStatus:id,label,color', 'history.fromStatus:id,label', 'history.user:id,name']);
+            'history.toStatus:id,label,color,sla_tier_id', 'history.fromStatus:id,label', 'history.user:id,name']);
 
         // Formulario del tipo×sistema (campos activos) para render/captura.
         $fields = EventTypeField::where('event_type_id', $event->event_type_id)
@@ -157,10 +213,17 @@ class EventController extends Controller
             ->orderBy('sort_order')->orderBy('id')
             ->get();
 
+        // Medición de SLA (usa el historial ya cargado + el mapeo estado→nivel).
+        $settings   = EventSla::resolve($event->client_id);
+        $tiers      = EventSla::tiers();
+        $statusMap  = EventStatus::whereNotNull('sla_tier_id')->pluck('sla_tier_id', 'id')->all();
+        $sla        = EventSla::measure($event, $settings, $statusMap, $tiers);
+
         return response()->json([
             'event'                => $event,
             'fields'               => $fields,
             'allowed_transitions'  => $this->allowedNext($event),
+            'sla'                  => $sla,
         ]);
     }
 
@@ -173,18 +236,45 @@ class EventController extends Controller
         $data = $request->validate([
             'description'  => 'sometimes|string|max:5000',
             'priority'     => 'nullable|in:' . implode(',', Event::PRIORITIES),
+            'impact'       => 'nullable|in:' . implode(',', Event::IMPACTS),
+            'urgency'      => 'nullable|in:' . implode(',', Event::URGENCIES),
+            'scheduled_attention_at' => 'nullable|date',
             'device_id'    => 'nullable|exists:devices,id',
             'occurred_at'  => 'nullable|date',
             'field_values' => 'nullable|array',
         ]);
 
-        DB::transaction(function () use ($event, $data, $request) {
+        // Prioridad: si cambian impacto/urgencia y la prioridad era automática (o el usuario
+        // no forzó una), se recalcula de la matriz; un valor explícito distinto = override.
+        $settings   = EventSla::resolve($event->client_id);
+        $impact     = array_key_exists('impact', $data)  ? $data['impact']  : $event->impact;
+        $urgency    = array_key_exists('urgency', $data) ? $data['urgency'] : $event->urgency;
+        $derived    = EventSla::priorityFor($impact, $urgency, $settings);
+        $explicit   = $data['priority'] ?? null;
+        if ($explicit && (! $derived || $explicit !== $derived)) {
+            $newPriority = $explicit; $newAuto = false;
+        } elseif ($derived) {
+            $newPriority = $derived; $newAuto = true;
+        } else {
+            $newPriority = $event->priority; $newAuto = $event->priority_auto;
+        }
+        $scheduledAt = EventSla::isScheduled($newPriority, $settings)
+            ? (array_key_exists('scheduled_attention_at', $data) ? $data['scheduled_attention_at'] : $event->scheduled_attention_at)
+            : null;
+
+        DB::transaction(function () use ($event, $data, $request, $impact, $urgency, $newPriority, $newAuto, $scheduledAt) {
             $event->update(array_filter([
                 'description'  => $data['description'] ?? null,
-                'priority'     => $data['priority'] ?? null,
                 'device_id'    => $data['device_id'] ?? null,
                 'occurred_at'  => $data['occurred_at'] ?? null,
-            ], fn ($v) => $v !== null) + ['field_values' => $data['field_values'] ?? $event->field_values]);
+            ], fn ($v) => $v !== null) + [
+                'impact'        => $impact,
+                'urgency'       => $urgency,
+                'priority'      => $newPriority,
+                'priority_auto' => $newAuto,
+                'scheduled_attention_at' => $scheduledAt,
+                'field_values'  => $data['field_values'] ?? $event->field_values,
+            ]);
 
             // Si estaba pendiente de captura y ya se llenó, avanza a 'en_progreso'.
             if (optional($event->status)->key === 'pendiente_captura' && ! empty($data['field_values'])) {

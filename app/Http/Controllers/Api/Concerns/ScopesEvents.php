@@ -15,6 +15,10 @@ trait ScopesEvents
     {
         $user = $request->user();
 
+        // Ocultar eventos de clientes o sitios archivados (soft-deleted) para TODOS
+        // los roles — incluida la reportería. whereHas respeta el SoftDeletes scope.
+        $query->whereHas('client')->whereHas('site');
+
         if ($user->hasAnyRole(['superadmin', 'admin'])) {
             return $query;
         }

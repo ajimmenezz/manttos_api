@@ -313,6 +313,9 @@ class MaintenanceController extends Controller
         $user = $request->user();
 
         $query = Maintenance::with(['system', 'site.client'])
+            // Oculta mantenimientos cuyo sitio o cliente esté archivado (cascada lógica);
+            // sin esto, site.client llega null y el grid del front revienta.
+            ->whereHas('site', fn ($q) => $q->whereHas('client'))
             ->when($request->filled('status'),    fn ($q) => $q->where('status', $request->status))
             ->when($request->filled('date_from'), fn ($q) => $q->where('start_date', '>=', $request->date_from))
             ->when($request->filled('date_to'),   fn ($q) => $q->where('start_date', '<=', $request->date_to))

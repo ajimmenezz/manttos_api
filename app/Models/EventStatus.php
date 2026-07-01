@@ -7,13 +7,19 @@ use Illuminate\Database\Eloquent\Model;
 class EventStatus extends Model
 {
     protected $fillable = [
-        'key', 'label', 'color', 'category', 'category_id',
+        'key', 'label', 'color', 'category', 'category_id', 'sla_tier_id',
         'is_initial', 'is_terminal', 'requires_form', 'requires_note', 'sort_order', 'is_active',
     ];
 
     public function category()
     {
         return $this->belongsTo(Catalog::class, 'category_id');
+    }
+
+    /** Nivel de atención de SLA que este estado representa (null = ninguno). */
+    public function slaTier()
+    {
+        return $this->belongsTo(EventSlaTier::class, 'sla_tier_id');
     }
 
     protected function casts(): array

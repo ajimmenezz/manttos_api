@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             CatalogSeeder::class,
             EventStatusSeeder::class,
             EventStatusCategorySeeder::class,
+            EventSlaSeeder::class,
         ]);
     }
 }

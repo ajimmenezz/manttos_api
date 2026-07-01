@@ -37,6 +37,8 @@ class EventStatusController extends Controller
             'is_terminal'   => 'boolean',
             'requires_form' => 'boolean',
             'requires_note' => 'boolean',
+            // Nivel de atención de SLA que representa este estado (null = ninguno).
+            'sla_tier_id'   => 'nullable|integer|exists:event_sla_tiers,id',
         ]);
         // La clave es interna y estable: se autogenera del nombre (no la captura el usuario).
         $data['key'] = $this->uniqueKey($data['label']);
@@ -55,6 +57,8 @@ class EventStatusController extends Controller
             'is_terminal'   => 'boolean',
             'requires_form' => 'boolean',
             'requires_note' => 'boolean',
+            // Nivel de atención de SLA que representa este estado (null = ninguno).
+            'sla_tier_id'   => 'nullable|integer|exists:event_sla_tiers,id',
         ]);
         // El 'key' es estable (lo usa la lógica del flujo) → no se edita.
         $eventStatus->update($data);

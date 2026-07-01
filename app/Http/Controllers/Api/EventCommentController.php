@@ -138,8 +138,17 @@ class EventCommentController extends Controller
     /** Usuarios activos que pueden ver/atender el evento (candidatos a @mención). */
     private function mentionableUsers(Event $event)
     {
+        // Solo roles que EXISTAN y NO estén archivados: el scope role() de Spatie usa
+        // App\Models\Role (con SoftDeletes) y lanza RoleDoesNotExist si el rol no está o
+        // fue archivado (p. ej. `admin`). El whereNull('deleted_at') lo excluye.
+        $adminRoles = DB::table('roles')
+            ->whereIn('name', ['superadmin', 'admin'])
+            ->where('guard_name', 'web')
+            ->whereNull('deleted_at')
+            ->pluck('name')->all();
+
         $ids = collect()
-            ->merge(User::role(['superadmin', 'admin'])->pluck('id'))
+            ->merge($adminRoles ? User::role($adminRoles)->pluck('id') : [])
             ->merge(DB::table('client_user')->where('client_id', $event->client_id)->pluck('user_id'))
             ->merge(DB::table('site_user')->where('site_id', $event->site_id)->pluck('user_id'))
             ->merge(DB::table('client_engineers')->where('client_id', $event->client_id)->pluck('user_id'))

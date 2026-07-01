@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 class Event extends Model
 {
     public const PRIORITIES = ['baja', 'media', 'alta', 'critica'];
+    public const IMPACTS    = ['alto', 'medio', 'bajo'];
+    public const URGENCIES  = ['alta', 'media', 'baja'];
 
     protected $fillable = [
         'folio',
@@ -18,6 +20,10 @@ class Event extends Model
         'device_id',
         'status_id',
         'priority',
+        'impact',
+        'urgency',
+        'priority_auto',
+        'scheduled_attention_at',
         'description',
         'field_values',
         'created_by',
@@ -28,8 +34,10 @@ class Event extends Model
     protected function casts(): array
     {
         return [
-            'field_values' => 'array',
-            'occurred_at'  => 'datetime',
+            'field_values'           => 'array',
+            'occurred_at'            => 'datetime',
+            'scheduled_attention_at' => 'datetime',
+            'priority_auto'          => 'boolean',
         ];
     }
 

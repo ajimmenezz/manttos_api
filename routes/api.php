@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
 use App\Http\Controllers\Api\EventTypeController;
 use App\Http\Controllers\Api\EventStatusController;
+use App\Http\Controllers\Api\EventSlaController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
@@ -229,11 +230,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/event-statuses/reorder',                 [EventStatusController::class, 'reorder']);
     Route::post('/event-statuses/transitions',             [EventStatusController::class, 'setTransitions']);
 
+    // ─── Eventos: catálogo de SLA (matriz Impacto×Urgencia, niveles, objetivos, calendario) ───
+    Route::get('/event-sla',                        [EventSlaController::class, 'index']);
+    Route::get('/event-sla/settings',               [EventSlaController::class, 'settings']);
+    Route::put('/event-sla/settings',               [EventSlaController::class, 'saveSettings']);
+    Route::delete('/event-sla/settings/{client}',   [EventSlaController::class, 'deleteSettings']);
+    Route::post('/event-sla/tiers',                 [EventSlaController::class, 'storeTier']);
+    Route::put('/event-sla/tiers/{tier}',           [EventSlaController::class, 'updateTier']);
+    Route::delete('/event-sla/tiers/{tier}',        [EventSlaController::class, 'destroyTier']);
+    Route::post('/event-sla/tiers/reorder',         [EventSlaController::class, 'reorderTiers']);
+    Route::put('/event-sla/status-tiers',           [EventSlaController::class, 'saveStatusTiers']);
+
     // ─── Eventos: operación (Operaciones → Eventos) ───
     Route::get('/events',                 [EventController::class, 'index']);
     Route::get('/events/form-fields',     [EventController::class, 'formFields']);  // antes del wildcard {event}
     Route::get('/events/dashboard',       [EventDashboardController::class, 'show']); // antes del wildcard {event}
     Route::get('/events/sync-bundle',     [EventController::class, 'syncBundle']);  // antes del wildcard {event}
+    Route::get('/events/sla-context',     [EventController::class, 'slaContext']);  // antes del wildcard {event}
     Route::post('/events',                [EventController::class, 'store']);
     Route::get('/events/{event}',         [EventController::class, 'show']);
     Route::put('/events/{event}',         [EventController::class, 'update']);

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Concerns\ScopesEvents;
 use App\Models\Event;
 use App\Models\EventStatus;
 use App\Models\EventType;
+use App\Support\EventSla;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -51,8 +52,10 @@ class EventDashboardController extends Controller
                 'system:id,label',
                 'client:id,name,short_name',
                 'site:id,name',
+                'history:id,event_id,to_status_id,created_at',
             ])
-            ->get(['id', 'client_id', 'site_id', 'system_id', 'event_type_id', 'status_id', 'priority', 'created_at']);
+            ->get(['id', 'client_id', 'site_id', 'system_id', 'event_type_id', 'status_id', 'priority',
+                   'impact', 'urgency', 'scheduled_attention_at', 'created_at']);
 
         $total = $events->count();
 
@@ -139,6 +142,52 @@ class EventDashboardController extends Controller
             ->map(fn ($g, $k) => ['category' => $k, 'count' => $g->count()])
             ->sortByDesc('count')->values();
 
+        // ── Distribución por impacto / urgencia ──────────────────────────────
+        $byImpact = collect(Event::IMPACTS)->map(fn ($i) => [
+            'impact' => $i, 'count' => $events->where('impact', $i)->count(),
+        ])->push(['impact' => 'sin_definir', 'count' => $events->whereNull('impact')->count()])
+          ->filter(fn ($r) => $r['count'] > 0)->values();
+
+        $byUrgency = collect(Event::URGENCIES)->map(fn ($u) => [
+            'urgency' => $u, 'count' => $events->where('urgency', $u)->count(),
+        ])->push(['urgency' => 'sin_definir', 'count' => $events->whereNull('urgency')->count()])
+          ->filter(fn ($r) => $r['count'] > 0)->values();
+
+        // ── SLA: cumplimiento por nivel de atención (matriz Impacto×Urgencia) ─
+        $slaTiers  = EventSla::tiers();
+        $statusMap = EventStatus::whereNotNull('sla_tier_id')->pluck('sla_tier_id', 'id')->all();
+        $counts    = ['met' => 0, 'breached' => 0, 'overdue' => 0, 'pending' => 0, 'scheduled' => 0, 'attended' => 0];
+        $tierAgg   = [];
+        foreach ($slaTiers as $t) {
+            $tierAgg[$t->id] = ['key' => $t->key, 'label' => $t->label,
+                'met' => 0, 'breached' => 0, 'overdue' => 0, 'pending' => 0];
+        }
+        $trackedCount = 0;
+        foreach ($events as $ev) {
+            $m = EventSla::measure($ev, EventSla::resolve($ev->client_id), $statusMap, $slaTiers);
+            if (! ($m['tracked'] ?? false)) continue;
+            $trackedCount++;
+            if ($m['scheduled']) {
+                $counts[$m['overall']] = ($counts[$m['overall']] ?? 0) + 1;
+                continue;
+            }
+            foreach ($m['tiers'] as $row) {
+                if (isset($tierAgg[$row['tier_id']][$row['state']])) $tierAgg[$row['tier_id']][$row['state']]++;
+                $counts[$row['state']] = ($counts[$row['state']] ?? 0) + 1;
+            }
+        }
+        $comp = fn ($met, $bad) => ($met + $bad) > 0 ? round($met / ($met + $bad) * 100) : null;
+        $byTier = collect($tierAgg)->map(function ($t) use ($comp) {
+            $bad = $t['breached'] + $t['overdue'];
+            return $t + ['total' => $t['met'] + $bad + $t['pending'], 'compliance_pct' => $comp($t['met'], $bad)];
+        })->values();
+        $sla = [
+            'tracked'        => $trackedCount,
+            'counts'         => $counts,
+            'compliance_pct' => $comp($counts['met'], $counts['breached'] + $counts['overdue']),
+            'by_tier'        => $byTier,
+        ];
+
         return response()->json([
             'summary' => [
                 'total'               => $total,
@@ -157,7 +206,10 @@ class EventDashboardController extends Controller
             'by_system'     => $bySystem,
             'by_client'     => $byClient,
             'by_site'       => $bySite,
+            'by_impact'     => $byImpact,
+            'by_urgency'    => $byUrgency,
             'weekly'        => $weekly,
+            'sla'           => $sla,
             'filters'       => $this->filterOptions($request),
         ]);
     }
