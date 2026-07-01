@@ -18,10 +18,12 @@ use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\MaintenanceController;
 use App\Http\Controllers\Api\DeviceImportExportController;
 use App\Http\Controllers\Api\DirectoryController;
+use App\Http\Controllers\Api\EventCommentController;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
 use App\Http\Controllers\Api\EventTypeController;
 use App\Http\Controllers\Api\EventStatusController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\PermissionController;
@@ -232,6 +234,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/{event}',         [EventController::class, 'show']);
     Route::put('/events/{event}',         [EventController::class, 'update']);
     Route::post('/events/{event}/status', [EventController::class, 'changeStatus']);
+
+    // Conversación del evento (hilos anidados + @menciones)
+    Route::get('/events/{event}/mentionable-users', [EventCommentController::class, 'mentionable']);
+    Route::get('/events/{event}/comments',                   [EventCommentController::class, 'index']);
+    Route::post('/events/{event}/comments',                  [EventCommentController::class, 'store']);
+    Route::put('/events/{event}/comments/{comment}',         [EventCommentController::class, 'update']);
+    Route::delete('/events/{event}/comments/{comment}',      [EventCommentController::class, 'destroy']);
+
+    // Notificaciones in-app (centro / campanita)
+    Route::get('/notifications',                 [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count',    [NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/read-all',       [NotificationController::class, 'markAllRead']);
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
 
     // Vista consolidada de mantenimientos (scope por rol)
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);
