@@ -113,6 +113,11 @@ class PermissionSeeder extends Seeder
 
             // Configuración del sistema
             'config.manage',
+
+            // Manuales de uso (guías completas web/móvil consultables dentro del sistema).
+            // 'admin' lo recibe automáticamente (RoleSeeder asigna todo salvo config.manage);
+            // superadmin lo bypasea. El resto de roles NO lo trae por defecto.
+            'manuals.view',
         ];
 
         foreach ($permissions as $permission) {
