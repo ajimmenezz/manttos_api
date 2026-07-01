@@ -8,7 +8,6 @@ use App\Models\User;
 use App\Services\MailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
@@ -19,6 +18,8 @@ class UserController extends Controller
     public function index(Request $request): JsonResponse
     {
         $users = User::with('roles')
+            // ?archived=1 → solo los archivados (papelera); por defecto solo activos.
+            ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
             ->when($request->search, fn ($q) => $q->where('name', 'ilike', "%{$request->search}%")
                 ->orWhere('email', 'ilike', "%{$request->search}%"))
             ->when($request->role, fn ($q) => $q->whereHas('roles', fn ($r) => $r->where('name', $request->role)))
@@ -103,84 +104,29 @@ class UserController extends Controller
 
     public function destroy(Request $request, User $user): JsonResponse
     {
-        // Solo el superadministrador puede eliminar usuarios (baja lógica).
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede eliminar usuarios.');
+        // Archivar = baja lógica (soft delete). Solo el superadministrador.
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar usuarios.');
+
+        // Única restricción: el superadministrador inicial nunca se archiva.
+        abort_if($user->id === 1, 403, 'No se puede archivar al superadministrador inicial.');
 
         if ($user->id === $request->user()->id) {
-            return response()->json(['message' => 'No puedes eliminar tu propia cuenta.'], 422);
-        }
-
-        if ($user->hasRole('superadmin')) {
-            return response()->json(['message' => 'No se puede eliminar al superadministrador.'], 403);
-        }
-
-        // Con registros asociados NO se elimina: solo puede inactivarse (dar de baja).
-        $records = $this->associatedRecordLabels($user);
-        if (! empty($records)) {
-            return response()->json([
-                'message'     => 'El usuario tiene registros asociados (' . implode(', ', $records) . '), '
-                    . 'por eso no puede eliminarse. Usa "Dar de baja" para inactivarlo.',
-                'has_records' => true,
-            ], 422);
+            return response()->json(['message' => 'No puedes archivar tu propia cuenta.'], 422);
         }
 
         $user->tokens()->delete();  // revoca sesiones y llaves de API
-        $user->delete();            // baja lógica (soft delete → deleted_at)
+        $user->delete();            // archivar (soft delete → deleted_at); reversible
 
-        return response()->json(['message' => 'Usuario eliminado correctamente.']);
+        return response()->json(['message' => 'Usuario archivado.']);
     }
 
-    /**
-     * Devuelve las categorías de registros asociados al usuario (huella operativa).
-     * Si hay al menos una, el usuario no debe eliminarse, solo inactivarse.
-     *
-     * @return string[]
-     */
-    private function associatedRecordLabels(User $user): array
+    public function restore(Request $request, User $user): JsonResponse
     {
-        $id     = $user->id;
-        $labels = [];
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar usuarios.');
 
-        if (DB::table('maintenance_activities')->where('user_id', $id)->exists()) {
-            $labels[] = 'actividades registradas';
-        }
-        if (DB::table('maintenance_engineers')->where('user_id', $id)->exists()) {
-            $labels[] = 'mantenimientos asignados';
-        }
-        if (DB::table('events')->where('created_by', $id)->orWhere('assigned_to', $id)->exists()) {
-            $labels[] = 'eventos';
-        }
-        if (DB::table('event_status_history')->where('user_id', $id)->exists()) {
-            $labels[] = 'historial de eventos';
-        }
-        if (DB::table('device_schedules')->where('created_by', $id)->exists()) {
-            $labels[] = 'programaciones de dispositivos';
-        }
-        if (DB::table('client_user')->where('user_id', $id)->exists()
-            || DB::table('site_user')->where('user_id', $id)->exists()) {
-            $labels[] = 'administración de clientes/sitios';
-        }
-        if (DB::table('client_engineers')->where('user_id', $id)->exists()
-            || DB::table('site_engineers')->where('user_id', $id)->exists()) {
-            $labels[] = 'asignaciones de ingeniería';
-        }
+        $user->restore();
 
-        // Registros creados por el usuario en el sistema (created_by / uploaded_by).
-        $createdByTables = ['clients', 'sites', 'directories', 'devices', 'maintenances',
-            'system_fields', 'floor_plans', 'device_placements', 'event_types'];
-        $createdSomething = false;
-        foreach ($createdByTables as $table) {
-            if (DB::table($table)->where('created_by', $id)->exists()) { $createdSomething = true; break; }
-        }
-        if (! $createdSomething) {
-            $createdSomething = DB::table('maintenance_contract_files')->where('uploaded_by', $id)->exists()
-                || DB::table('users')->where('created_by', $id)->exists();
-        }
-        if ($createdSomething) {
-            $labels[] = 'registros creados en el sistema';
-        }
-
-        return $labels;
+        return response()->json(['message' => 'Usuario restaurado.', 'user' => $this->serializeUser($user->fresh('roles'))]);
     }
 
     public function toggleStatus(User $user): JsonResponse

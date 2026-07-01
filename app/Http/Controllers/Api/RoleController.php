@@ -3,28 +3,31 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Role;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
+use Illuminate\Validation\Rule;
 
 class RoleController extends Controller
 {
-    // Roles que no se pueden modificar ni eliminar
+    // Roles que no se pueden modificar
     private const SYSTEM_ROLES = ['superadmin', 'admin', 'admin-cliente', 'admin-sitio'];
 
-    // Roles que NUNCA se eliminan (críticos + funcionales referenciados en código).
-    // admin y tecnico SÍ pueden eliminarse (si no tienen usuarios) por decisión de negocio.
+    // Roles que NUNCA se archivan (críticos + funcionales referenciados en código).
+    // admin y tecnico SÍ pueden archivarse (si no tienen usuarios) por decisión de negocio.
     private const PROTECTED_FROM_DELETION = ['superadmin', 'admin-cliente', 'admin-sitio', 'ingeniero'];
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $roles = Role::with('permissions')->withCount('users')->orderBy('name')->get()->map(function ($role) {
-            $role->is_system   = in_array($role->name, self::SYSTEM_ROLES);
-            // Eliminable solo si no está protegido y no tiene usuarios asignados.
-            $role->is_deletable = ! in_array($role->name, self::PROTECTED_FROM_DELETION) && $role->users_count === 0;
-            return $role;
-        });
+        $roles = Role::with('permissions')->withCount('users')
+            // ?archived=1 → solo los archivados (papelera); por defecto solo activos.
+            ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
+            ->orderBy('name')->get()->map(function ($role) {
+                $role->is_system = in_array($role->name, self::SYSTEM_ROLES);
+                // Archivable solo si no está protegido y no tiene usuarios asignados.
+                $role->is_archivable = ! in_array($role->name, self::PROTECTED_FROM_DELETION) && $role->users_count === 0;
+                return $role;
+            });
 
         return response()->json($roles);
     }
@@ -32,7 +35,8 @@ class RoleController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'name'          => 'required|string|max:100|unique:roles,name',
+            // Ignora roles archivados al validar unicidad (aunque el índice de BD aún reserva el nombre).
+            'name'          => ['required', 'string', 'max:100', Rule::unique('roles', 'name')->whereNull('deleted_at')],
             'permissions'   => 'nullable|array',
             'permissions.*' => 'exists:permissions,name',
         ]);
@@ -62,7 +66,7 @@ class RoleController extends Controller
         }
 
         $request->validate([
-            'name'          => "required|string|max:100|unique:roles,name,{$role->id}",
+            'name'          => ['required', 'string', 'max:100', Rule::unique('roles', 'name')->ignore($role->id)->whereNull('deleted_at')],
             'permissions'   => 'nullable|array',
             'permissions.*' => 'exists:permissions,name',
         ]);
@@ -79,26 +83,35 @@ class RoleController extends Controller
         ]);
     }
 
+    // Archivar = baja lógica (soft delete). Reversible desde "Ver archivados".
     public function destroy(Request $request, Role $role): JsonResponse
     {
-        // Solo el superadministrador puede eliminar roles.
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede eliminar roles.');
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar roles.');
 
         if (in_array($role->name, self::PROTECTED_FROM_DELETION)) {
-            return response()->json(['message' => 'Este rol es parte del sistema y no se puede eliminar.'], 403);
+            return response()->json(['message' => 'Este rol es parte del sistema y no se puede archivar.'], 403);
         }
 
-        // Solo se elimina si no tiene usuarios asignados.
+        // Solo se archiva si no tiene usuarios (un rol archivado dejaría de conceder permisos).
         if ($role->users()->exists()) {
             return response()->json([
-                'message'   => 'El rol tiene usuarios asignados. Reasígnalos a otro rol antes de eliminarlo.',
+                'message'   => 'El rol tiene usuarios asignados. Reasígnalos a otro rol antes de archivarlo.',
                 'has_users' => true,
             ], 422);
         }
 
         $role->delete();
 
-        return response()->json(['message' => 'Rol eliminado correctamente.']);
+        return response()->json(['message' => 'Rol archivado.']);
+    }
+
+    public function restore(Request $request, Role $role): JsonResponse
+    {
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar roles.');
+
+        $role->restore();
+
+        return response()->json(['message' => 'Rol restaurado.', 'role' => $role->load('permissions')]);
     }
 
     public function syncPermissions(Request $request, Role $role): JsonResponse

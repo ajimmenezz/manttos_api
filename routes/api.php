@@ -72,10 +72,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Roles
     Route::apiResource('/roles', RoleController::class);
     Route::post('/roles/{role}/permissions', [RoleController::class, 'syncPermissions']);
+    Route::post('/roles/{role}/restore', [RoleController::class, 'restore'])->withTrashed();
 
     // Usuarios
     Route::apiResource('/users', UserController::class);
     Route::post('/users/{user}/toggle-status', [UserController::class, 'toggleStatus']);
+    Route::post('/users/{user}/restore', [UserController::class, 'restore'])->withTrashed();
     Route::post('/users/{user}/send-temp-password', [UserController::class, 'sendTempPassword']);
     Route::post('/users/{user}/permissions', [UserController::class, 'assignPermissions']);
 
