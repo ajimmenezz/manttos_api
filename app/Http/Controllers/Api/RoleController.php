@@ -13,10 +13,16 @@ class RoleController extends Controller
     // Roles que no se pueden modificar ni eliminar
     private const SYSTEM_ROLES = ['superadmin', 'admin', 'admin-cliente', 'admin-sitio'];
 
+    // Roles que NUNCA se eliminan (críticos + funcionales referenciados en código).
+    // admin y tecnico SÍ pueden eliminarse (si no tienen usuarios) por decisión de negocio.
+    private const PROTECTED_FROM_DELETION = ['superadmin', 'admin-cliente', 'admin-sitio', 'ingeniero'];
+
     public function index(): JsonResponse
     {
-        $roles = Role::with('permissions')->orderBy('name')->get()->map(function ($role) {
-            $role->is_system = in_array($role->name, self::SYSTEM_ROLES);
+        $roles = Role::with('permissions')->withCount('users')->orderBy('name')->get()->map(function ($role) {
+            $role->is_system   = in_array($role->name, self::SYSTEM_ROLES);
+            // Eliminable solo si no está protegido y no tiene usuarios asignados.
+            $role->is_deletable = ! in_array($role->name, self::PROTECTED_FROM_DELETION) && $role->users_count === 0;
             return $role;
         });
 
@@ -73,10 +79,21 @@ class RoleController extends Controller
         ]);
     }
 
-    public function destroy(Role $role): JsonResponse
+    public function destroy(Request $request, Role $role): JsonResponse
     {
-        if (in_array($role->name, self::SYSTEM_ROLES)) {
-            return response()->json(['message' => 'Los roles del sistema no se pueden eliminar.'], 403);
+        // Solo el superadministrador puede eliminar roles.
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede eliminar roles.');
+
+        if (in_array($role->name, self::PROTECTED_FROM_DELETION)) {
+            return response()->json(['message' => 'Este rol es parte del sistema y no se puede eliminar.'], 403);
+        }
+
+        // Solo se elimina si no tiene usuarios asignados.
+        if ($role->users()->exists()) {
+            return response()->json([
+                'message'   => 'El rol tiene usuarios asignados. Reasígnalos a otro rol antes de eliminarlo.',
+                'has_users' => true,
+            ], 422);
         }
 
         $role->delete();
