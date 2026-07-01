@@ -225,6 +225,12 @@ class EventController extends Controller
                 "Para pasar a «{$target->label}» primero debes capturar el formulario: " . implode(', ', $missing) . '.');
         }
 
+        // Estados que exigen nota: el cambio no procede sin una nota escrita.
+        if ($target && $target->requires_note) {
+            abort_if(trim((string) ($data['note'] ?? '')) === '', 422,
+                "Para pasar a «{$target->label}» debes escribir una nota.");
+        }
+
         DB::transaction(function () use ($event, $data, $request) {
             $from = $event->status_id;
             $event->update(['status_id' => $data['to_status_id']]);
@@ -359,7 +365,7 @@ class EventController extends Controller
         }
 
         $statuses = EventStatus::where('is_active', true)->orderBy('sort_order')
-            ->get(['id', 'key', 'label', 'color', 'is_initial', 'is_terminal']);
+            ->get(['id', 'key', 'label', 'color', 'is_initial', 'is_terminal', 'requires_form', 'requires_note']);
 
         return response()->json([
             'sites'             => $sitesOut,

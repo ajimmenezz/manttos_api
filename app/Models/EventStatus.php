@@ -8,7 +8,7 @@ class EventStatus extends Model
 {
     protected $fillable = [
         'key', 'label', 'color', 'category', 'category_id',
-        'is_initial', 'is_terminal', 'requires_form', 'sort_order', 'is_active',
+        'is_initial', 'is_terminal', 'requires_form', 'requires_note', 'sort_order', 'is_active',
     ];
 
     public function category()
@@ -22,6 +22,7 @@ class EventStatus extends Model
             'is_initial'    => 'boolean',
             'is_terminal'   => 'boolean',
             'requires_form' => 'boolean',
+            'requires_note' => 'boolean',
             'is_active'     => 'boolean',
             'sort_order'    => 'integer',
         ];
