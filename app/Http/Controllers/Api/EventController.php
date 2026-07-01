@@ -45,6 +45,8 @@ class EventController extends Controller
             ->when($request->filled('search'),        fn ($q) => $q->where(fn ($s) =>
                 $s->where('events.folio', 'ilike', "%{$request->search}%")
                   ->orWhere('events.description', 'ilike', "%{$request->search}%")))
+            // Oculta eventos cuyo cliente o sitio esté archivado (cascada lógica).
+            ->whereHas('client')->whereHas('site')
             ->orderByDesc('events.created_at');
 
         $this->scopeEvents($request, $query);

@@ -37,6 +37,10 @@ class DirectoryController extends Controller
         $query = Directory::query()
             ->join('sites', 'directories.site_id', '=', 'sites.id')
             ->join('clients', 'sites.client_id', '=', 'clients.id')
+            // Oculta directorios de sitios/clientes archivados (los join crudos no aplican
+            // el scope de SoftDeletes, así que se filtra explícitamente).
+            ->whereNull('sites.deleted_at')
+            ->whereNull('clients.deleted_at')
             ->with(['system', 'site.client'])
             ->withCount('devices')
             ->select('directories.*')

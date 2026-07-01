@@ -47,6 +47,8 @@ class ClientController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Client::withCount('sites')
+            // ?archived=1 → solo archivados (papelera); por defecto solo activos.
+            ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
             ->when($request->search, fn ($q) => $q->where('name', 'ilike', "%{$request->search}%")
                 ->orWhere('short_name', 'ilike', "%{$request->search}%"))
             ->when($request->filled('is_active'), fn ($q) => $q->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN)))
@@ -106,17 +108,24 @@ class ClientController extends Controller
         return response()->json(['message' => 'Cliente actualizado correctamente.', 'client' => $client]);
     }
 
-    public function destroy(Client $client): JsonResponse
+    // Archivar = baja lógica reversible. Sus sitios/directorios/eventos/mantenimientos
+    // quedan ocultos automáticamente (los listados filtran por whereHas del cliente).
+    public function destroy(Request $request, Client $client): JsonResponse
     {
-        if ($client->sites()->exists()) {
-            return response()->json([
-                'message' => 'No se puede eliminar un cliente que tiene sitios registrados. Desactívalo en su lugar.',
-            ], 422);
-        }
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar clientes.');
 
         $client->delete();
 
-        return response()->json(['message' => 'Cliente eliminado correctamente.']);
+        return response()->json(['message' => 'Cliente archivado.']);
+    }
+
+    public function restore(Request $request, Client $client): JsonResponse
+    {
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar clientes.');
+
+        $client->restore();
+
+        return response()->json(['message' => 'Cliente restaurado.', 'client' => $client]);
     }
 
     public function toggleStatus(Request $request, Client $client): JsonResponse

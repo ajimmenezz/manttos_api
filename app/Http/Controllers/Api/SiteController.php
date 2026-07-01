@@ -77,6 +77,10 @@ class SiteController extends Controller
     {
         $user  = $request->user();
         $query = Site::with('client')
+            // Oculta sitios cuyo cliente está archivado (cascada lógica).
+            ->whereHas('client')
+            // ?archived=1 → solo sitios archivados; por defecto solo activos.
+            ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
             ->when($request->search, fn ($q) => $q->where('sites.name', 'ilike', "%{$request->search}%")
                 ->orWhere('sites.city', 'ilike', "%{$request->search}%"))
             ->when($request->filled('is_active'), fn ($q) => $q->where('sites.is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN)))
@@ -100,6 +104,7 @@ class SiteController extends Controller
     public function index(Request $request, Client $client): JsonResponse
     {
         $baseQuery = $client->sites()
+            ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
             ->when($request->search, fn ($q) => $q->where('name', 'ilike', "%{$request->search}%")
                 ->orWhere('code', 'ilike', "%{$request->search}%")
                 ->orWhere('city', 'ilike', "%{$request->search}%"))
@@ -162,12 +167,24 @@ class SiteController extends Controller
         return response()->json(['message' => 'Sitio actualizado correctamente.', 'site' => $site->load('client')]);
     }
 
+    // Archivar = baja lógica reversible (solo superadmin). Sus directorios/dispositivos/
+    // mantenimientos/eventos quedan ocultos (los listados filtran por whereHas del sitio).
     public function destroy(Request $request, Client $client, Site $site): JsonResponse
     {
-        $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar sitios.');
+        abort_unless($site->client_id === $client->id, 404);
         $site->delete();
 
-        return response()->json(['message' => 'Sitio eliminado correctamente.']);
+        return response()->json(['message' => 'Sitio archivado.']);
+    }
+
+    public function restore(Request $request, Client $client, Site $site): JsonResponse
+    {
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar sitios.');
+        abort_unless($site->client_id === $client->id, 404);
+        $site->restore();
+
+        return response()->json(['message' => 'Sitio restaurado.', 'site' => $site->load('client')]);
     }
 
     public function toggleStatus(Request $request, Client $client, Site $site): JsonResponse

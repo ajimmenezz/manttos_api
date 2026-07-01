@@ -85,6 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/all', [ClientController::class, 'all']);
     Route::apiResource('/clients', ClientController::class);
     Route::post('/clients/{client}/toggle-status', [ClientController::class, 'toggleStatus']);
+    Route::post('/clients/{client}/restore', [ClientController::class, 'restore'])->withTrashed();
 
     // Sitios — lista plana (acceso del usuario actual) + anidados en cliente
     Route::get('/sites', [SiteController::class, 'all']);
@@ -94,6 +95,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/{client}/sites/compact', [SiteController::class, 'compact']);
     Route::apiResource('/clients/{client}/sites', SiteController::class);
     Route::post('/clients/{client}/sites/{site}/toggle-status', [SiteController::class, 'toggleStatus']);
+    Route::post('/clients/{client}/sites/{site}/restore', [SiteController::class, 'restore'])->withTrashed();
 
     // Administradores de cliente
     Route::get('/clients/{client}/admins', [ClientUserController::class, 'index']);
