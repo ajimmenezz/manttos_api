@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ScopesEvents;
+use App\Models\AppSetting;
 use App\Models\Catalog;
 use App\Models\Directory;
 use App\Models\Event;
@@ -13,6 +14,7 @@ use App\Models\EventType;
 use App\Models\EventTypeField;
 use App\Models\EventTypeTransition;
 use App\Models\Site;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +24,20 @@ use App\Support\EventSla;
 class EventController extends Controller
 {
     use ScopesEvents;
+
+    /**
+     * Resuelve la fecha de ocurrencia respetando el flag global. Si la captura manual
+     * está apagada (o no viene fecha), usa $fallback (now() al crear, o null al editar
+     * para conservar la existente). Si está prendida y la fecha es válida no futura, la respeta.
+     */
+    private function resolveOccurredAt(?string $provided, $fallback)
+    {
+        if (! AppSetting::executionDateAllowed() || empty($provided)) {
+            return $fallback;
+        }
+        $d = Carbon::parse($provided);
+        return $d->startOfDay()->lte(Carbon::today()) ? $d : $fallback;
+    }
 
     private function authorizeAccess(Request $request, Event $event): void
     {
@@ -123,7 +139,7 @@ class EventController extends Controller
                 'description'   => $data['description'],
                 'field_values'  => $hasForm ? $data['field_values'] : null,
                 'created_by'    => $user->id,
-                'occurred_at'   => $data['occurred_at'] ?? now(),
+                'occurred_at'   => $this->resolveOccurredAt($data['occurred_at'] ?? null, now()),
             ]);
 
             EventStatusHistory::create([
@@ -266,7 +282,7 @@ class EventController extends Controller
             $event->update(array_filter([
                 'description'  => $data['description'] ?? null,
                 'device_id'    => $data['device_id'] ?? null,
-                'occurred_at'  => $data['occurred_at'] ?? null,
+                'occurred_at'  => $this->resolveOccurredAt($data['occurred_at'] ?? null, null),
             ], fn ($v) => $v !== null) + [
                 'impact'        => $impact,
                 'urgency'       => $urgency,

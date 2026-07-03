@@ -7,6 +7,7 @@ use App\Models\Catalog;
 use App\Models\Device;
 use App\Models\MaintenanceFrequency;
 use App\Models\SystemField;
+use App\Models\TaskDuration;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -336,6 +337,51 @@ class SystemController extends Controller
         });
 
         return response()->json(['message' => 'Frecuencias de mantenimiento actualizadas.']);
+    }
+
+    /** Tiempos estándar por tarea (minutos) definidos para el sistema. */
+    public function taskDurations(int $id): JsonResponse
+    {
+        $system = $this->resolveSystem($id);
+
+        return response()->json(
+            TaskDuration::where('system_id', $system->id)
+                ->get(['device_type_id', 'activity_type_id', 'minutes'])
+        );
+    }
+
+    /** Reemplaza (sync) los tiempos por tarea del sistema con la matriz enviada. */
+    public function syncTaskDurations(Request $request, int $id): JsonResponse
+    {
+        $system = $this->resolveSystem($id);
+
+        $data = $request->validate([
+            'durations'                    => 'present|array',
+            'durations.*.device_type_id'   => 'required|integer|exists:catalogs,id',
+            'durations.*.activity_type_id' => 'required|integer|exists:catalogs,id',
+            'durations.*.minutes'          => 'required|integer|min:1|max:100000',
+        ]);
+
+        $validDeviceTypes   = $system->deviceTypes()->pluck('catalogs.id')->all();
+        $validActivityTypes = $system->activityTypes()->pluck('catalogs.id')->all();
+
+        DB::transaction(function () use ($system, $data, $validDeviceTypes, $validActivityTypes) {
+            TaskDuration::where('system_id', $system->id)->delete();
+
+            foreach ($data['durations'] as $row) {
+                if (! in_array((int) $row['device_type_id'], $validDeviceTypes, true)) continue;
+                if (! in_array((int) $row['activity_type_id'], $validActivityTypes, true)) continue;
+
+                TaskDuration::create([
+                    'system_id'        => $system->id,
+                    'device_type_id'   => $row['device_type_id'],
+                    'activity_type_id' => $row['activity_type_id'],
+                    'minutes'          => $row['minutes'],
+                ]);
+            }
+        });
+
+        return response()->json(['message' => 'Tiempos por tarea actualizados.']);
     }
 
     // ── Campos de plantilla ───────────────────────────────────────────────────

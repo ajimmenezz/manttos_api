@@ -54,12 +54,19 @@ class AppSettingController extends Controller
         return $map;
     }
 
+    /** Normaliza los flags booleanos (guardados como '1'/'0') a booleano real en la respuesta. */
+    private function normalizeFlags(array $map): array
+    {
+        $map['allow_execution_date'] = ($map['allow_execution_date'] ?? '0') === '1';
+        return $map;
+    }
+
     /** GET /settings/public — sin autenticación. Tema resuelto por dominio. */
     public function publicIndex(Request $request): JsonResponse
     {
         $map = AppSetting::allAsMap(Tenant::fromRequest($request));
         unset($map['smtp_password'], $map['smtp_username']);
-        return response()->json($this->decodeTheme($map));
+        return response()->json($this->normalizeFlags($this->decodeTheme($map)));
     }
 
     /** GET /settings — autenticado. Edita el tema del dominio actual. */
@@ -74,7 +81,7 @@ class AppSettingController extends Controller
             $map['smtp_password'] = self::SMTP_PASSWORD_PLACEHOLDER;
         }
 
-        return response()->json($this->decodeTheme($map));
+        return response()->json($this->normalizeFlags($this->decodeTheme($map)));
     }
 
     /** PUT /settings */
@@ -88,6 +95,7 @@ class AppSettingController extends Controller
             'login_bg_url'    => 'sometimes|nullable|string|max:500',
             'color_preset'    => 'sometimes|string|in:blue,indigo,violet,green,orange,rose',
             'theme'           => 'sometimes|nullable|array',
+            'allow_execution_date' => 'sometimes|boolean',
             'smtp_host'       => 'sometimes|nullable|string|max:255',
             'smtp_port'       => 'sometimes|nullable|integer|min:1|max:65535',
             'smtp_encryption' => 'sometimes|nullable|string|in:tls,ssl,none',
@@ -107,9 +115,11 @@ class AppSettingController extends Controller
                 continue;
             }
 
-            $stored = $key === 'theme'
-                ? ($value !== null ? json_encode($value) : null)
-                : ($value !== null ? (string) $value : null);
+            $stored = match (true) {
+                $key === 'theme'                => ($value !== null ? json_encode($value) : null),
+                $key === 'allow_execution_date' => ($value ? '1' : '0'),
+                default                         => ($value !== null ? (string) $value : null),
+            };
 
             $scope = in_array($key, $perTenant, true) ? $tenant : AppSetting::DEFAULT_TENANT;
             AppSetting::setValue($key, $stored, $scope);

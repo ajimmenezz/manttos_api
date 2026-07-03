@@ -3,18 +3,34 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppSetting;
 use App\Models\Catalog;
 use App\Models\Device;
 use App\Models\Directory;
 use App\Models\FloorPlan;
 use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class MaintenanceActivityController extends Controller
 {
+    /**
+     * Resuelve la fecha de ejecución respetando el flag global. Si la captura manual
+     * está apagada (o no viene fecha), usa la del momento ($fallback). Si está prendida
+     * y viene una fecha válida no futura, la respeta (fecha de ejecución de la migración).
+     */
+    private function resolveExecutionDate(?string $provided, $fallback)
+    {
+        if (! AppSetting::executionDateAllowed() || empty($provided)) {
+            return $fallback;
+        }
+        $d = Carbon::parse($provided);
+        return $d->startOfDay()->lte(Carbon::today()) ? $d : $fallback;
+    }
+
     private function authorizeAccess(Maintenance $maintenance): void
     {
         $user = request()->user();
@@ -185,7 +201,7 @@ class MaintenanceActivityController extends Controller
             'activity_type_id' => $data['activity_type_id'],
             'user_id'          => $request->user()->id,
             'field_values'     => $data['field_values'] ?? [],
-            'performed_at'     => $data['performed_at'] ?? now(),
+            'performed_at'     => $this->resolveExecutionDate($data['performed_at'] ?? null, now()),
         ]);
 
         return response()->json(
@@ -273,7 +289,7 @@ class MaintenanceActivityController extends Controller
 
         $activity->update([
             'field_values' => $data['field_values'] ?? $activity->field_values,
-            'performed_at' => $data['performed_at'] ?? $activity->performed_at,
+            'performed_at' => $this->resolveExecutionDate($data['performed_at'] ?? null, $activity->performed_at),
         ]);
 
         return response()->json(

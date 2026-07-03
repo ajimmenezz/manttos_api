@@ -16,7 +16,18 @@ class AppSetting extends Model
 
     public const DEFAULT_TENANT = 'default';
 
-    public const ALLOWED_KEYS = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme'];
+    public const ALLOWED_KEYS = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme', 'allow_execution_date'];
+
+    /**
+     * ¿Está permitido capturar manualmente la fecha de ejecución de actividades
+     * y eventos? (flag global temporal para la migración desde otra herramienta).
+     * Si está apagado, se usa la fecha del momento de captura (now()).
+     */
+    public static function executionDateAllowed(): bool
+    {
+        $v = self::allAsMap()['allow_execution_date'] ?? null;
+        return $v === '1' || $v === 'true' || $v === true || $v === 1;
+    }
 
     /**
      * Mapa de ajustes para un tenant (dominio). Parte de los valores del tenant

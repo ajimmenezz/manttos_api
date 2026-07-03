@@ -34,8 +34,8 @@ class EventDashboardController extends Controller
             ->when($request->filled('event_type_id'), fn ($q) => $q->where('events.event_type_id', $request->event_type_id))
             ->when($request->filled('status_id'),     fn ($q) => $q->where('events.status_id', $request->status_id))
             ->when($request->filled('priority'),      fn ($q) => $q->where('events.priority', $request->priority))
-            ->when($dateFrom, fn ($q) => $q->where('events.created_at', '>=', $dateFrom))
-            ->when($dateTo,   fn ($q) => $q->where('events.created_at', '<=', $dateTo));
+            ->when($dateFrom, fn ($q) => $q->whereRaw('COALESCE(events.occurred_at, events.created_at) >= ?', [$dateFrom]))
+            ->when($dateTo,   fn ($q) => $q->whereRaw('COALESCE(events.occurred_at, events.created_at) <= ?', [$dateTo]));
         $this->scopeEvents($request, $base);
 
         // Filtro por naturaleza (incidente/solicitud) requiere join lógico vía tipo
@@ -55,7 +55,7 @@ class EventDashboardController extends Controller
                 'history:id,event_id,to_status_id,created_at',
             ])
             ->get(['id', 'client_id', 'site_id', 'system_id', 'event_type_id', 'status_id', 'priority',
-                   'impact', 'urgency', 'scheduled_attention_at', 'created_at']);
+                   'impact', 'urgency', 'scheduled_attention_at', 'occurred_at', 'created_at']);
 
         $total = $events->count();
 
@@ -128,8 +128,8 @@ class EventDashboardController extends Controller
             ])
             ->sortByDesc('count')->values()->take(12);
 
-        // ── Serie semanal (por created_at) ────────────────────────────────────
-        $weekly = $events->groupBy(fn ($e) => Carbon::parse($e->created_at)->startOfWeek()->toDateString())
+        // ── Serie semanal (por fecha de ocurrencia, con fallback a created_at) ─
+        $weekly = $events->groupBy(fn ($e) => Carbon::parse($e->occurred_at ?? $e->created_at)->startOfWeek()->toDateString())
             ->map(fn ($g, $week) => [
                 'week_start' => $week,
                 'label'      => Carbon::parse($week)->isoFormat('DD MMM'),

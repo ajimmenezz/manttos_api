@@ -99,6 +99,10 @@ class PermissionSeeder extends Seeder
             'maintenances.edit',
             'maintenances.assign-engineers',
             'maintenances.record-activity',
+            // Plan de acción (planeación de capacidad): sección restringida. La reciben
+            // solo superadmin (bypass) y admin interno (Permission::all()); NO admin-cliente,
+            // admin-sitio, ingeniero ni técnico. Otorgable a un rol/usuario "planeador".
+            'maintenances.action-plan',
 
             // Actividades
             'activities.view-registration-date',

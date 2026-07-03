@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AppSettingController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DeveloperTokenController;
 use App\Http\Middleware\RequireWriteScope;
+use App\Http\Controllers\Api\MaintenanceActionPlanController;
 use App\Http\Controllers\Api\MaintenanceActivityController;
 use App\Http\Controllers\Api\MaintenanceDashboardController;
 use App\Http\Controllers\Api\MediaController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\Api\EventSlaController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
+use App\Http\Controllers\Api\WorkCalendarController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RoleController;
@@ -54,6 +56,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/settings/tenants',    [AppSettingController::class, 'tenants']);
     Route::put('/settings',            [AppSettingController::class, 'update']);
     Route::post('/settings/test-mail', [AppSettingController::class, 'testMail']);
+
+    // Calendario laboral (plan de acción): días/horas + festivos. Restringido a config.manage.
+    Route::get('/work-calendar',                       [WorkCalendarController::class, 'show']);
+    Route::put('/work-calendar',                       [WorkCalendarController::class, 'update']);
+    Route::post('/work-calendar/holidays',             [WorkCalendarController::class, 'storeHoliday']);
+    Route::delete('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'destroyHoliday']);
+
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/change-password', [AuthController::class, 'changePassword']);
 
@@ -144,6 +153,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/activity-types',       [SystemController::class, 'activityTypes']);
         Route::get('/frequencies',          [SystemController::class, 'frequencies']);
         Route::post('/frequencies/sync',    [SystemController::class, 'syncFrequencies']);
+        Route::get('/task-durations',       [SystemController::class, 'taskDurations']);
+        Route::post('/task-durations/sync', [SystemController::class, 'syncTaskDurations']);
         Route::get('/fields',                          [SystemController::class, 'fields']);
         Route::post('/fields',                         [SystemController::class, 'storeField']);
         Route::post('/fields/reorder',                 [SystemController::class, 'reorderFields']);
@@ -284,6 +295,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Actividades de mantenimiento
     Route::get('/maintenances/{maintenance}/dashboard',          [MaintenanceDashboardController::class, 'show']);
     Route::get('/maintenances/{maintenance}/contract-dashboard', [MaintenanceDashboardController::class, 'contractDashboard']);
+    // Plan de acción (restringido a maintenances.action-plan)
+    Route::get('/maintenances/{maintenance}/action-plan',        [MaintenanceActionPlanController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/action-plan/agenda', [MaintenanceActionPlanController::class, 'agenda']);
+    Route::post('/maintenances/{maintenance}/action-plan/agenda',[MaintenanceActionPlanController::class, 'applyAgenda']);
     Route::get('/maintenances/{maintenance}/activity-types',   [MaintenanceActivityController::class, 'activityTypes']);
     Route::get('/maintenances/{maintenance}/activity-devices', [MaintenanceActivityController::class, 'devices']);
     Route::get('/maintenances/{maintenance}/activity-counts',  [MaintenanceActivityController::class, 'activityCounts']);
