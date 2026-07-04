@@ -60,6 +60,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Calendario laboral (plan de acción): días/horas + festivos. Restringido a config.manage.
     Route::get('/work-calendar',                       [WorkCalendarController::class, 'show']);
     Route::put('/work-calendar',                       [WorkCalendarController::class, 'update']);
+    Route::get('/work-calendar/holidays/suggest',      [WorkCalendarController::class, 'suggestHolidays']);
+    Route::post('/work-calendar/holidays/bulk',        [WorkCalendarController::class, 'bulkStoreHolidays']);
     Route::post('/work-calendar/holidays',             [WorkCalendarController::class, 'storeHoliday']);
     Route::delete('/work-calendar/holidays/{holiday}', [WorkCalendarController::class, 'destroyHoliday']);
 
