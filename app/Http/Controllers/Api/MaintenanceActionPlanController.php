@@ -93,7 +93,7 @@ class MaintenanceActionPlanController extends Controller
         $dailyMin  = $plan['capacity']['daily_minutes_per_engineer'];
         $dailyCap  = $engineers * $dailyMin;
 
-        $rules = $this->normalizeRules($maintenance->agenda_rules['rules'] ?? []);
+        $buckets = $this->normalizeBuckets($maintenance->agenda_rules['buckets'] ?? []);
 
         $start = $maintenance->start_date ? Carbon::parse($maintenance->start_date) : null;
         $end   = $maintenance->end_date   ? Carbon::parse($maintenance->end_date)   : null;
@@ -104,7 +104,7 @@ class MaintenanceActionPlanController extends Controller
             'days' => [], 'assignments' => [], 'warnings' => [],
             'meta' => ['reason' => $reason, 'daily_capacity_minutes' => $dailyCap, 'engineers' => $engineers,
                        'working_days' => 0, 'total_devices' => 0, 'total_tasks' => 0,
-                       'over_capacity' => false, 'ordered' => ! empty($rules), 'rules_count' => count($rules)],
+                       'over_capacity' => false, 'ordered' => ! empty($buckets), 'rules_count' => count($buckets)],
         ];
 
         if (empty($tasks))                                    return $empty('sin_pendientes');
@@ -115,9 +115,10 @@ class MaintenanceActionPlanController extends Controller
         $workingDates = WorkCalendar::workingDates($planFrom, $end);  // Carbon[]
         if (empty($workingDates))                             return $empty('sin_dias_habiles');
 
-        // Ordena las tareas por las reglas y les calcula la "ruta" (Torre 1 · Preventivo).
-        $ordered = $this->sortTasksByRules($tasks, $rules);
-        foreach ($ordered as &$t) $t['path'] = $this->taskPath($t, $rules);
+        // Ordena las tareas por los bloques de prioridad y les calcula la "ruta"
+        // (el nombre del bloque que las colocó, ej. "Torre 1 · Preventivos").
+        $ordered = $this->sortTasksByBuckets($tasks, $buckets);
+        foreach ($ordered as &$t) $t['path'] = $this->bucketPath($t, $buckets);
         unset($t);
 
         // Llenado secuencial preservando el orden: si la tarea no cabe en el día actual
@@ -180,107 +181,157 @@ class MaintenanceActionPlanController extends Controller
                 'total_devices' => count($assignments),
                 'total_tasks'  => count($ordered),
                 'over_capacity' => $overflow,
-                'ordered'      => ! empty($rules),
-                'rules_count'  => count($rules),
+                'ordered'      => ! empty($buckets),
+                'rules_count'  => count($buckets),
             ],
         ];
     }
 
-    // ── Reglas de orden de la agenda ──────────────────────────────────────────
+    // ── Bloques de prioridad de la agenda ─────────────────────────────────────
+    // Modelo tipo "reglas de formulario": una lista ORDENADA de bloques; cada bloque
+    // es un árbol de condiciones (Y/O anidable). Cada tarea cae en el PRIMER bloque
+    // que cumple → ese índice manda el orden. Las que no caen en ninguno van al final.
 
-    private const RULE_DIMS = ['directory_field', 'device_type', 'activity_type'];
+    /** Operadores de condición soportados. `in`/`not_in` operan sobre un conjunto de valores. */
+    private const AG_OPS = ['in', 'not_in', 'eq', 'neq', 'empty', 'not_empty'];
+    private const AG_VALUELESS_OPS = ['empty', 'not_empty'];
 
-    /** Arriba de este nº de valores, el campo se marca "alta cardinalidad" (el front usa buscador, no arrastra todo). */
+    /** Claves sintéticas para condicionar por tipo de dispositivo / actividad (no son del directorio). */
+    private const AG_DEVICE_TYPE   = '__device_type__';
+    private const AG_ACTIVITY_TYPE = '__activity_type__';
+
+    /** Arriba de este nº de valores, el campo se marca "alta cardinalidad" (el front usa buscador). */
     private const HIGH_CARD_THRESHOLD = 25;
 
     /** Tope de valores enviados por campo (para el buscador), evita payloads patológicos. */
     private const MAX_VALUES_SENT = 2000;
 
-    /** Deja solo reglas bien formadas (dimensión válida; field_key si aplica). */
-    private function normalizeRules($rules): array
+    /** Deja solo bloques bien formados (con al menos una condición válida). */
+    private function normalizeBuckets($buckets): array
     {
-        if (! is_array($rules)) return [];
+        if (! is_array($buckets)) return [];
         $out = [];
-        $seen = [];
-        foreach ($rules as $r) {
-            if (! is_array($r)) continue;
-            $dim = $r['dim'] ?? null;
-            if (! in_array($dim, self::RULE_DIMS, true)) continue;
-            $fieldKey = $dim === 'directory_field' ? ($r['field_key'] ?? null) : null;
-            if ($dim === 'directory_field' && (! is_string($fieldKey) || $fieldKey === '')) continue;
-            $sig = $dim . ':' . ($fieldKey ?? '');
-            if (isset($seen[$sig])) continue;                 // una regla por dimensión/campo
-            $seen[$sig] = true;
-            $order = is_array($r['order'] ?? null) ? array_values($r['order']) : [];
-            $out[] = ['dim' => $dim, 'field_key' => $fieldKey, 'order' => $order];
+        foreach ($buckets as $b) {
+            if (! is_array($b)) continue;
+            $group = $this->normalizeGroup($b['group'] ?? null);
+            if ($group === null) continue;                    // bloque sin condiciones → se descarta
+            $name = isset($b['name']) && is_string($b['name']) ? trim($b['name']) : '';
+            $out[] = ['name' => $name, 'group' => $group];
         }
         return $out;
     }
 
-    /** Valor de la tarea para una regla (string comparable). */
-    private function ruleValue(array $task, array $rule): string
+    /** Normaliza un grupo recursivo; devuelve null si queda sin hijos válidos. */
+    private function normalizeGroup($node): ?array
     {
-        return match ($rule['dim']) {
-            'directory_field' => (string) ($task['custom_fields'][$rule['field_key']] ?? ''),
-            'device_type'     => (string) $task['device_type_id'],
-            'activity_type'   => (string) $task['activity_type_id'],
-            default           => '',
-        };
-    }
-
-    /** Etiqueta legible del valor de la tarea para la "ruta" mostrada. */
-    private function ruleLabel(array $task, array $rule): string
-    {
-        return match ($rule['dim']) {
-            'directory_field' => (string) ($task['custom_fields'][$rule['field_key']] ?? '—'),
-            'device_type'     => $task['device_type_label'],
-            'activity_type'   => $task['activity_type_label'],
-            default           => '',
-        };
-    }
-
-    /** Ordena las tareas por la lista de reglas (la primera manda), con orden natural de respaldo. */
-    private function sortTasksByRules(array $tasks, array $rules): array
-    {
-        // Mapa valor→posición por regla (los no listados van al final, en orden natural).
-        $pos = [];
-        foreach ($rules as $i => $rule) {
-            $map = [];
-            foreach ($rule['order'] as $idx => $val) $map[(string) $val] = $idx;
-            $pos[$i] = $map;
-        }
-
-        usort($tasks, function ($a, $b) use ($rules, $pos) {
-            foreach ($rules as $i => $rule) {
-                $va = $this->ruleValue($a, $rule);
-                $vb = $this->ruleValue($b, $rule);
-                $pa = $pos[$i][$va] ?? PHP_INT_MAX;
-                $pb = $pos[$i][$vb] ?? PHP_INT_MAX;
-                if ($pa !== $pb) return $pa <=> $pb;
-                if ($va !== $vb) return strnatcasecmp($va, $vb);
+        if (! is_array($node)) return null;
+        $combinator = ($node['combinator'] ?? 'and') === 'or' ? 'or' : 'and';
+        $childrenIn = is_array($node['children'] ?? null) ? $node['children'] : [];
+        $children = [];
+        foreach ($childrenIn as $c) {
+            if (! is_array($c)) continue;
+            if (($c['kind'] ?? null) === 'group') {
+                $g = $this->normalizeGroup($c);
+                if ($g !== null) $children[] = $g;
+            } else {
+                $cond = $this->normalizeCondition($c);
+                if ($cond !== null) $children[] = $cond;
             }
-            // Desempate estable: dispositivo, luego actividad.
+        }
+        if (empty($children)) return null;                    // grupo vacío no coincide con nada → se descarta
+        return ['kind' => 'group', 'combinator' => $combinator, 'children' => $children];
+    }
+
+    /** Normaliza una condición; devuelve null si es inválida (sin campo, o sin valores cuando el operador los exige). */
+    private function normalizeCondition($c): ?array
+    {
+        $field = $c['field'] ?? null;
+        if (! is_string($field) || $field === '') return null;
+        $op = $c['op'] ?? 'in';
+        if (! in_array($op, self::AG_OPS, true)) $op = 'in';
+        $values = is_array($c['values'] ?? null)
+            ? array_values(array_filter(array_map(fn ($v) => (string) $v, $c['values']), fn ($v) => $v !== ''))
+            : [];
+        if (! in_array($op, self::AG_VALUELESS_OPS, true) && empty($values)) return null;
+        return ['kind' => 'condition', 'field' => $field, 'op' => $op, 'values' => $values];
+    }
+
+    /** Valor comparable (string) de la tarea para un campo de condición. */
+    private function taskFieldValue(array $task, string $field): string
+    {
+        if ($field === self::AG_DEVICE_TYPE)   return (string) $task['device_type_id'];
+        if ($field === self::AG_ACTIVITY_TYPE) return (string) $task['activity_type_id'];
+        $v = $task['custom_fields'][$field] ?? null;
+        return is_array($v) ? '' : (string) ($v ?? '');
+    }
+
+    /** Evalúa un nodo (grupo o condición) contra una tarea. */
+    private function evalAgNode(array $node, array $task): bool
+    {
+        if (($node['kind'] ?? '') === 'condition') return $this->evalAgCondition($node, $task);
+        $children = $node['children'] ?? [];
+        if (empty($children)) return false;
+        if (($node['combinator'] ?? 'and') === 'and') {
+            foreach ($children as $c) if (! $this->evalAgNode($c, $task)) return false;
+            return true;
+        }
+        foreach ($children as $c) if ($this->evalAgNode($c, $task)) return true;
+        return false;
+    }
+
+    private function evalAgCondition(array $cond, array $task): bool
+    {
+        $val = $this->taskFieldValue($task, $cond['field']);
+        $set = $cond['values'] ?? [];
+        return match ($cond['op']) {
+            'in'        => in_array($val, $set, true),
+            'not_in'    => ! in_array($val, $set, true),
+            'eq'        => $val === ($set[0] ?? ''),
+            'neq'       => $val !== ($set[0] ?? ''),
+            'empty'     => $val === '',
+            'not_empty' => $val !== '',
+            default     => false,
+        };
+    }
+
+    /** Índice del primer bloque que cumple la tarea (o count($buckets) si ninguno). */
+    private function bucketIndex(array $task, array $buckets): int
+    {
+        foreach ($buckets as $i => $b) {
+            if ($this->evalAgNode($b['group'], $task)) return $i;
+        }
+        return count($buckets);
+    }
+
+    /** Ordena las tareas por bloque (el primero que cumple manda), con orden natural de respaldo. */
+    private function sortTasksByBuckets(array $tasks, array $buckets): array
+    {
+        foreach ($tasks as &$t) $t['__bucket'] = $this->bucketIndex($t, $buckets);
+        unset($t);
+
+        usort($tasks, function ($a, $b) {
+            if ($a['__bucket'] !== $b['__bucket']) return $a['__bucket'] <=> $b['__bucket'];
+            // Desempate estable dentro del bloque: dispositivo, luego actividad (mantiene juntas las tareas del mismo disp.).
             return [$a['device_id'], $a['activity_type_id']] <=> [$b['device_id'], $b['activity_type_id']];
         });
 
         return $tasks;
     }
 
-    /** Ruta legible de la tarea según las reglas: "Torre 1 · Preventivo". */
-    private function taskPath(array $task, array $rules): string
+    /** Ruta legible de la tarea = nombre del bloque que la colocó ("Bloque N" si no tiene nombre). */
+    private function bucketPath(array $task, array $buckets): string
     {
-        if (empty($rules)) return '';
-        $parts = [];
-        foreach ($rules as $rule) {
-            $lbl = $this->ruleLabel($task, $rule);
-            $parts[] = ($lbl === '' ? '—' : $lbl);
-        }
-        return implode(' · ', $parts);
+        if (empty($buckets)) return '';
+        $i = $task['__bucket'] ?? $this->bucketIndex($task, $buckets);
+        if ($i >= count($buckets)) return 'Otros';
+        $name = $buckets[$i]['name'] ?? '';
+        return $name !== '' ? $name : ('Bloque ' . ($i + 1));
     }
 
     /**
      * GET /maintenances/{maintenance}/action-plan/agenda-options
-     * Dimensiones disponibles para armar las reglas + las reglas guardadas.
+     * Campos condicionables (directorio + tipo de dispositivo/actividad) con sus valores
+     * presentes, más los bloques de prioridad guardados.
      */
     public function agendaOptions(Maintenance $maintenance): JsonResponse
     {
@@ -293,14 +344,15 @@ class MaintenanceActionPlanController extends Controller
                 $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
             )->where('is_active', true)->get(['id', 'device_type', 'custom_fields']);
 
-        // Campos del directorio ordenables (excluye tipos no discretos).
+        $fields = [];
+
+        // Campos del directorio condicionables (excluye tipos no discretos).
         $skip = ['image', 'signature', 'did'];
         $sysFields = \App\Models\SystemField::where('catalog_id', $systemId)
             ->where('is_active', true)
             ->whereNotIn('field_type', $skip)
             ->orderBy('sort_order')->get(['label', 'field_key', 'field_type']);
 
-        $directoryFields = [];
         foreach ($sysFields as $f) {
             $vals = $devices
                 ->map(fn ($d) => is_array($d->custom_fields) ? ($d->custom_fields[$f->field_key] ?? null) : null)
@@ -309,61 +361,72 @@ class MaintenanceActionPlanController extends Controller
                 ->unique()->values()->all();
             usort($vals, 'strnatcasecmp');
             $count = count($vals);
-            if ($count < 1) continue;                          // sin valores → no aporta orden
-            // Alta cardinalidad (ej. "área"): el front NO arrastra todo; el usuario elige valores
-            // a priorizar con un buscador y el resto queda en orden natural. Se acota el payload.
+            if ($count < 1) continue;                          // sin valores → no aporta al orden
             $truncated = $count > self::MAX_VALUES_SENT;
             if ($truncated) $vals = array_slice($vals, 0, self::MAX_VALUES_SENT);
-            $directoryFields[] = [
-                'field_key'        => $f->field_key,
+            $fields[] = [
+                'key'              => $f->field_key,
                 'label'            => $f->label,
-                'values'           => $vals,
+                'kind'             => 'directory',
+                'field_type'       => $f->field_type,
+                'values'           => array_map(fn ($v) => ['id' => $v, 'label' => $v], $vals),
                 'value_count'      => $count,
                 'high_cardinality' => $count > self::HIGH_CARD_THRESHOLD,
                 'values_truncated' => $truncated,
             ];
         }
 
-        // Tipos de dispositivo presentes.
+        // Tipo de dispositivo (presentes en el sitio).
         $system    = Catalog::findOrFail($systemId);
         $typeById  = $system->deviceTypes()->orderBy('catalogs.label')->pluck('catalogs.label', 'catalogs.id');
         $presentLabels = $devices->pluck('device_type')->unique();
-        $deviceTypes = [];
+        $deviceTypeVals = [];
         foreach ($typeById as $id => $label) {
-            if ($presentLabels->contains($label)) $deviceTypes[] = ['id' => (int) $id, 'label' => $label];
+            if ($presentLabels->contains($label)) $deviceTypeVals[] = ['id' => (string) $id, 'label' => $label];
+        }
+        if (! empty($deviceTypeVals)) {
+            $fields[] = [
+                'key' => self::AG_DEVICE_TYPE, 'label' => 'Tipo de dispositivo', 'kind' => 'device_type',
+                'field_type' => 'list', 'values' => $deviceTypeVals,
+                'value_count' => count($deviceTypeVals), 'high_cardinality' => false, 'values_truncated' => false,
+            ];
         }
 
-        // Tipos de actividad enlazados al sistema.
+        // Tipo de actividad (enlazados al sistema).
         $linkedTypeIds = DB::table('activity_type_systems')->where('system_id', $systemId)->pluck('activity_type_id');
-        $activityTypes = Catalog::whereIn('id', $linkedTypeIds)
+        $activityTypeVals = Catalog::whereIn('id', $linkedTypeIds)
             ->where('type', Catalog::TYPE_ACTIVITY_TYPE)->where('is_active', true)
             ->orderBy('label')->get(['id', 'label'])
-            ->map(fn ($c) => ['id' => (int) $c->id, 'label' => $c->label])->values();
+            ->map(fn ($c) => ['id' => (string) $c->id, 'label' => $c->label])->values()->all();
+        if (! empty($activityTypeVals)) {
+            $fields[] = [
+                'key' => self::AG_ACTIVITY_TYPE, 'label' => 'Tipo de actividad', 'kind' => 'activity_type',
+                'field_type' => 'list', 'values' => $activityTypeVals,
+                'value_count' => count($activityTypeVals), 'high_cardinality' => false, 'values_truncated' => false,
+            ];
+        }
 
         return response()->json([
-            'directory_fields' => $directoryFields,
-            'device_types'     => $deviceTypes,
-            'activity_types'   => $activityTypes,
-            'rules'            => $this->normalizeRules($maintenance->agenda_rules['rules'] ?? []),
+            'fields'  => $fields,
+            'buckets' => $this->normalizeBuckets($maintenance->agenda_rules['buckets'] ?? []),
         ]);
     }
 
-    /** PUT /maintenances/{maintenance}/action-plan/rules — guarda las reglas de orden. */
+    /** PUT /maintenances/{maintenance}/action-plan/rules — guarda los bloques de prioridad. */
     public function saveRules(Request $request, Maintenance $maintenance): JsonResponse
     {
         $this->authorize($maintenance);
 
         $request->validate([
-            'rules'             => 'present|array',
-            'rules.*.dim'       => 'required|in:' . implode(',', self::RULE_DIMS),
-            'rules.*.field_key' => 'nullable|string|max:60',
-            'rules.*.order'     => 'nullable|array',
+            'buckets'         => 'present|array',
+            'buckets.*.name'  => 'nullable|string|max:80',
+            'buckets.*.group' => 'required|array',
         ]);
 
-        $rules = $this->normalizeRules($request->input('rules', []));
-        $maintenance->update(['agenda_rules' => empty($rules) ? null : ['rules' => $rules]]);
+        $buckets = $this->normalizeBuckets($request->input('buckets', []));
+        $maintenance->update(['agenda_rules' => empty($buckets) ? null : ['buckets' => $buckets]]);
 
-        return response()->json(['message' => 'Reglas de orden guardadas.', 'rules' => $rules]);
+        return response()->json(['message' => 'Bloques de prioridad guardados.', 'buckets' => $buckets]);
     }
 
     /**
