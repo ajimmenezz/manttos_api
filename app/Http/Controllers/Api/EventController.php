@@ -219,7 +219,7 @@ class EventController extends Controller
         $this->authorizeAccess($request, $event);
 
         $event->load(['eventType', 'system:id,label', 'status', 'site:id,name,client_id',
-            'client:id,name,short_name', 'device:id,device_name,device_type', 'creator:id,name', 'assignee:id,name',
+            'client:id,name,short_name', 'device:id,name,device_type,location,custom_fields', 'creator:id,name', 'assignee:id,name',
             'history.toStatus:id,label,color,sla_tier_id', 'history.fromStatus:id,label', 'history.user:id,name']);
 
         // Formulario del tipo×sistema (campos activos) para render/captura.
@@ -281,7 +281,6 @@ class EventController extends Controller
         DB::transaction(function () use ($event, $data, $request, $impact, $urgency, $newPriority, $newAuto, $scheduledAt) {
             $event->update(array_filter([
                 'description'  => $data['description'] ?? null,
-                'device_id'    => $data['device_id'] ?? null,
                 'occurred_at'  => $this->resolveOccurredAt($data['occurred_at'] ?? null, null),
             ], fn ($v) => $v !== null) + [
                 'impact'        => $impact,
@@ -290,7 +289,8 @@ class EventController extends Controller
                 'priority_auto' => $newAuto,
                 'scheduled_attention_at' => $scheduledAt,
                 'field_values'  => $data['field_values'] ?? $event->field_values,
-            ]);
+            // device_id por presencia: permite ligar Y desligar (null) explícitamente.
+            ] + (array_key_exists('device_id', $data) ? ['device_id' => $data['device_id']] : []));
 
             // Si estaba pendiente de captura y ya se llenó, avanza a 'en_progreso'.
             if (optional($event->status)->key === 'pendiente_captura' && ! empty($data['field_values'])) {
@@ -388,6 +388,55 @@ class EventController extends Controller
             if ($empty) $missing[] = $f->label;
         }
         return $missing;
+    }
+
+    // ─── Búsqueda de dispositivos del directorio (sitio × sistema) ────
+    /**
+     * Dispositivos del directorio (sitio + sistema) para ligar a un evento. Búsqueda
+     * server-side por nombre / DID / ubicación con tope, para no cargar miles.
+     */
+    public function deviceOptions(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user->can('events.create') || $user->can('events.view'), 403);
+
+        $data = $request->validate([
+            'site_id'   => 'required|exists:sites,id',
+            'system_id' => 'required|exists:catalogs,id',
+            'search'    => 'nullable|string|max:100',
+        ]);
+
+        $site = Site::findOrFail($data['site_id']);
+        abort_unless($this->userCanUseSite($request, $site), 403, 'No tienes acceso a este sitio.');
+
+        $q = \App\Models\Device::whereHas('directory', fn ($d) =>
+                $d->where('site_id', $data['site_id'])->where('catalog_id', $data['system_id'])->where('is_active', true)
+            )->where('is_active', true);
+
+        $search = trim((string) ($data['search'] ?? ''));
+        if ($search !== '') {
+            $q->where(fn ($w) => $w
+                ->where('name', 'ilike', "%{$search}%")
+                ->orWhere('location', 'ilike', "%{$search}%")
+                ->orWhereRaw("custom_fields->>'did' ilike ?", ["%{$search}%"]));
+        }
+
+        $total   = (clone $q)->count();
+        $limit   = 30;
+        $devices = $q->orderBy('name')->limit($limit)->get(['id', 'name', 'device_type', 'location', 'custom_fields']);
+
+        return response()->json([
+            'devices' => $devices->map(fn ($d) => [
+                'id'          => $d->id,
+                'name'        => $d->name,
+                'device_type' => $d->device_type,
+                'location'    => $d->location,
+                'did'         => is_array($d->custom_fields) ? ($d->custom_fields['did'] ?? null) : null,
+            ])->values(),
+            'total'     => $total,
+            'limit'     => $limit,
+            'truncated' => $total > $limit,
+        ]);
     }
 
     // ─── Formulario por (tipo, sistema) para el create ────────────

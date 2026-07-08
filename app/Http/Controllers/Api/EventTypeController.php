@@ -169,6 +169,20 @@ class EventTypeController extends Controller
         return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
     }
 
+    /** Marca/desmarca el campo para el Reporte de eventos (KPI + filtro). */
+    public function toggleReport(EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
+    {
+        abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
+        // Solo tipos explotables pueden encenderse (apagar siempre se permite).
+        abort_if(
+            ! $field->show_in_report && ! in_array($field->field_type, EventTypeField::REPORTABLE_TYPES, true),
+            422,
+            'Este tipo de campo no puede marcarse para el reporte.'
+        );
+        $field->update(['show_in_report' => ! $field->show_in_report]);
+        return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
+    }
+
     public function reorderFields(Request $request, EventType $eventType, int $systemId): JsonResponse
     {
         $this->resolveSystem($systemId);

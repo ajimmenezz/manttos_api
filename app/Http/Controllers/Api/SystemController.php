@@ -554,6 +554,18 @@ class SystemController extends Controller
         return response()->json(['message' => "Campo {$status} bitácora.", 'field' => $field]);
     }
 
+    /** Marca/desmarca el campo del directorio como KPI del Reporte de eventos. */
+    public function toggleEventReport(int $id, SystemField $field): JsonResponse
+    {
+        $system = $this->resolveSystem($id);
+        abort_unless($field->catalog_id === $system->id, 404);
+
+        $field->update(['show_in_event_report' => ! $field->show_in_event_report]);
+        $status = $field->show_in_event_report ? 'incluido en' : 'excluido del';
+
+        return response()->json(['message' => "Campo {$status} reporte de eventos.", 'field' => $field]);
+    }
+
     public function fieldImpact(int $id, SystemField $field): JsonResponse
     {
         $system = $this->resolveSystem($id);

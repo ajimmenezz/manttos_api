@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\EventCommentController;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
 use App\Http\Controllers\Api\EventTypeController;
+use App\Http\Controllers\Api\UserPreferenceController;
 use App\Http\Controllers\Api\EventStatusController;
 use App\Http\Controllers\Api\EventSlaController;
 use App\Http\Controllers\Api\NotificationController;
@@ -165,6 +166,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/fields/{field}/toggle-status',   [SystemController::class, 'toggleField']);
         Route::post('/fields/{field}/toggle-dashboard', [SystemController::class, 'toggleDashboard']);
         Route::post('/fields/{field}/toggle-bitacora',  [SystemController::class, 'toggleBitacora']);
+        Route::post('/fields/{field}/toggle-event-report', [SystemController::class, 'toggleEventReport']);
         Route::delete('/fields/{field}',                [SystemController::class, 'destroyField']);
     });
 
@@ -230,6 +232,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/fields/reorder',              [EventTypeController::class, 'reorderFields']);
         Route::put('/fields/{field}',               [EventTypeController::class, 'updateField']);
         Route::post('/fields/{field}/toggle-status', [EventTypeController::class, 'toggleField']);
+        Route::post('/fields/{field}/toggle-report', [EventTypeController::class, 'toggleReport']);
         Route::delete('/fields/{field}',            [EventTypeController::class, 'destroyField']);
         Route::post('/link',                        [EventTypeController::class, 'linkSystem']);
         Route::delete('/link',                      [EventTypeController::class, 'unlinkSystem']);
@@ -258,8 +261,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events',                 [EventController::class, 'index']);
     Route::get('/events/form-fields',     [EventController::class, 'formFields']);  // antes del wildcard {event}
     Route::get('/events/dashboard',       [EventDashboardController::class, 'show']); // antes del wildcard {event}
+    Route::get('/events/export',          [EventDashboardController::class, 'export']); // antes del wildcard {event}
+    Route::get('/events/report-list',     [EventDashboardController::class, 'reportList']); // antes del wildcard {event}
+
+    // Preferencias de UI por usuario (clave→JSON): p. ej. columnas del reporte de eventos
+    Route::get('/me/preferences/{key}',   [UserPreferenceController::class, 'show']);
+    Route::put('/me/preferences/{key}',   [UserPreferenceController::class, 'update']);
     Route::get('/events/sync-bundle',     [EventController::class, 'syncBundle']);  // antes del wildcard {event}
     Route::get('/events/sla-context',     [EventController::class, 'slaContext']);  // antes del wildcard {event}
+    Route::get('/events/devices',         [EventController::class, 'deviceOptions']); // antes del wildcard {event}
     Route::post('/events',                [EventController::class, 'store']);
     Route::get('/events/{event}',         [EventController::class, 'show']);
     Route::put('/events/{event}',         [EventController::class, 'update']);
@@ -299,6 +309,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/contract-dashboard', [MaintenanceDashboardController::class, 'contractDashboard']);
     // Plan de acción (restringido a maintenances.action-plan)
     Route::get('/maintenances/{maintenance}/action-plan',        [MaintenanceActionPlanController::class, 'show']);
+    Route::get('/maintenances/{maintenance}/action-plan/agenda-options', [MaintenanceActionPlanController::class, 'agendaOptions']);
+    Route::put('/maintenances/{maintenance}/action-plan/rules',   [MaintenanceActionPlanController::class, 'saveRules']);
     Route::get('/maintenances/{maintenance}/action-plan/agenda', [MaintenanceActionPlanController::class, 'agenda']);
     Route::post('/maintenances/{maintenance}/action-plan/agenda',[MaintenanceActionPlanController::class, 'applyAgenda']);
     Route::get('/maintenances/{maintenance}/activity-types',   [MaintenanceActivityController::class, 'activityTypes']);

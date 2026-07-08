@@ -17,14 +17,16 @@ class Maintenance extends Model
         'end_date',
         'status',
         'notes',
+        'agenda_rules',
         'created_by',
     ];
 
     protected function casts(): array
     {
         return [
-            'start_date' => 'date',
-            'end_date'   => 'date',
+            'start_date'   => 'date',
+            'end_date'     => 'date',
+            'agenda_rules' => 'array',
         ];
     }
 

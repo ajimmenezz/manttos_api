@@ -78,18 +78,22 @@ class MaintenanceActionPlanController extends Controller
     }
 
     /**
-     * Genera una agenda día-por-día repartiendo los dispositivos pendientes en los
-     * días hábiles restantes, respetando el tope diario (ingenieros × minutos/día).
-     * Como device_schedules es una fecha por dispositivo, la unidad es el dispositivo
-     * (se suman los minutos de todas sus actividades pendientes). First-fit decreasing.
+     * Genera una agenda día-por-día a nivel TAREA (dispositivo × actividad), ordenada
+     * por las reglas de prioridad del mantenimiento (campo del directorio / tipo de
+     * dispositivo / tipo de actividad, con orden explícito de valores). Las tareas se
+     * ordenan y luego se llenan los días respetando el tope diario (ingenieros × min/día),
+     * conservando el orden pedido (no first-fit). `device_schedules` guarda una fecha por
+     * dispositivo, así que a cada dispositivo se le asigna su PRIMER día en la cola.
      */
     public function buildAgenda(Maintenance $maintenance): array
     {
         $plan      = $this->computePlan($maintenance);
-        $pending   = $plan['devices_pending'];                       // device_id => minutos
+        $tasks     = $plan['pending_tasks'];
         $engineers = $plan['engineers'];
         $dailyMin  = $plan['capacity']['daily_minutes_per_engineer'];
         $dailyCap  = $engineers * $dailyMin;
+
+        $rules = $this->normalizeRules($maintenance->agenda_rules['rules'] ?? []);
 
         $start = $maintenance->start_date ? Carbon::parse($maintenance->start_date) : null;
         $end   = $maintenance->end_date   ? Carbon::parse($maintenance->end_date)   : null;
@@ -99,10 +103,11 @@ class MaintenanceActionPlanController extends Controller
         $empty = fn (string $reason) => [
             'days' => [], 'assignments' => [], 'warnings' => [],
             'meta' => ['reason' => $reason, 'daily_capacity_minutes' => $dailyCap, 'engineers' => $engineers,
-                       'working_days' => 0, 'total_devices' => 0, 'over_capacity' => false],
+                       'working_days' => 0, 'total_devices' => 0, 'total_tasks' => 0,
+                       'over_capacity' => false, 'ordered' => ! empty($rules), 'rules_count' => count($rules)],
         ];
 
-        if (empty($pending))                                  return $empty('sin_pendientes');
+        if (empty($tasks))                                    return $empty('sin_pendientes');
         if ($engineers === 0)                                 return $empty('sin_ingenieros');
         if (! $start || ! $end)                               return $empty('sin_fechas');
         if ($today->gt($end))                                 return $empty('vencido');
@@ -110,42 +115,51 @@ class MaintenanceActionPlanController extends Controller
         $workingDates = WorkCalendar::workingDates($planFrom, $end);  // Carbon[]
         if (empty($workingDates))                             return $empty('sin_dias_habiles');
 
-        $names = Device::whereIn('id', array_keys($pending))->pluck('name', 'id');
+        // Ordena las tareas por las reglas y les calcula la "ruta" (Torre 1 · Preventivo).
+        $ordered = $this->sortTasksByRules($tasks, $rules);
+        foreach ($ordered as &$t) $t['path'] = $this->taskPath($t, $rules);
+        unset($t);
 
-        // First-fit decreasing (los más pesados primero).
-        $items = [];
-        foreach ($pending as $id => $min) $items[] = ['id' => (int) $id, 'min' => (int) $min];
-        usort($items, fn ($a, $b) => $b['min'] <=> $a['min']);
-
+        // Llenado secuencial preservando el orden: si la tarea no cabe en el día actual
+        // (y ya hay algo), avanza al siguiente; el último día absorbe el sobrecupo.
         $n = count($workingDates);
-        $dayLoad = array_fill(0, $n, 0);
-        $dayDevices = array_fill(0, $n, []);
+        $dayTasks = array_fill(0, $n, []);
+        $dayLoad  = array_fill(0, $n, 0);
         $assignments = [];
         $overflow = false;
+        $di = 0;
 
-        foreach ($items as $it) {
-            $placed = -1;
-            for ($i = 0; $i < $n; $i++) {
-                if ($dayLoad[$i] + $it['min'] <= $dailyCap) { $placed = $i; break; }
+        foreach ($ordered as $t) {
+            if ($di < $n - 1 && $dayLoad[$di] > 0 && $dayLoad[$di] + $t['minutes'] > $dailyCap) {
+                $di++;
             }
-            if ($placed === -1) {
-                // No cabe en ningún día → al día menos cargado (sobrecupo).
-                $placed = 0;
-                for ($i = 1; $i < $n; $i++) if ($dayLoad[$i] < $dayLoad[$placed]) $placed = $i;
-                $overflow = true;
+            $dayTasks[$di][] = $t;
+            $dayLoad[$di]   += $t['minutes'];
+            if ($dayLoad[$di] > $dailyCap) $overflow = true;
+            // Como $di es no decreciente, la primera aparición del dispositivo es su día más temprano.
+            if (! isset($assignments[$t['device_id']])) {
+                $assignments[$t['device_id']] = $workingDates[$di]->toDateString();
             }
-            $dayLoad[$placed] += $it['min'];
-            $dayDevices[$placed][] = ['id' => $it['id'], 'name' => $names[$it['id']] ?? ('#' . $it['id']), 'minutes' => $it['min']];
-            $assignments[$it['id']] = $workingDates[$placed]->toDateString();
         }
 
         $days = [];
         for ($i = 0; $i < $n; $i++) {
-            if (empty($dayDevices[$i])) continue;
+            if (empty($dayTasks[$i])) continue;
+            $devIds = [];
+            foreach ($dayTasks[$i] as $t) $devIds[$t['device_id']] = true;
             $days[] = [
                 'date'             => $workingDates[$i]->toDateString(),
-                'devices'          => $dayDevices[$i],
-                'device_count'     => count($dayDevices[$i]),
+                'tasks'            => array_map(fn ($t) => [
+                    'device_id'           => $t['device_id'],
+                    'device_name'         => $t['device_name'],
+                    'device_type_label'   => $t['device_type_label'],
+                    'activity_type_id'    => $t['activity_type_id'],
+                    'activity_type_label' => $t['activity_type_label'],
+                    'minutes'             => $t['minutes'],
+                    'path'                => $t['path'],
+                ], $dayTasks[$i]),
+                'task_count'       => count($dayTasks[$i]),
+                'device_count'     => count($devIds),
                 'total_minutes'    => $dayLoad[$i],
                 'capacity_minutes' => $dailyCap,
                 'over_capacity'    => $dayLoad[$i] > $dailyCap,
@@ -164,9 +178,192 @@ class MaintenanceActionPlanController extends Controller
                 'engineers'    => $engineers,
                 'working_days' => $n,
                 'total_devices' => count($assignments),
+                'total_tasks'  => count($ordered),
                 'over_capacity' => $overflow,
+                'ordered'      => ! empty($rules),
+                'rules_count'  => count($rules),
             ],
         ];
+    }
+
+    // ── Reglas de orden de la agenda ──────────────────────────────────────────
+
+    private const RULE_DIMS = ['directory_field', 'device_type', 'activity_type'];
+
+    /** Arriba de este nº de valores, el campo se marca "alta cardinalidad" (el front usa buscador, no arrastra todo). */
+    private const HIGH_CARD_THRESHOLD = 25;
+
+    /** Tope de valores enviados por campo (para el buscador), evita payloads patológicos. */
+    private const MAX_VALUES_SENT = 2000;
+
+    /** Deja solo reglas bien formadas (dimensión válida; field_key si aplica). */
+    private function normalizeRules($rules): array
+    {
+        if (! is_array($rules)) return [];
+        $out = [];
+        $seen = [];
+        foreach ($rules as $r) {
+            if (! is_array($r)) continue;
+            $dim = $r['dim'] ?? null;
+            if (! in_array($dim, self::RULE_DIMS, true)) continue;
+            $fieldKey = $dim === 'directory_field' ? ($r['field_key'] ?? null) : null;
+            if ($dim === 'directory_field' && (! is_string($fieldKey) || $fieldKey === '')) continue;
+            $sig = $dim . ':' . ($fieldKey ?? '');
+            if (isset($seen[$sig])) continue;                 // una regla por dimensión/campo
+            $seen[$sig] = true;
+            $order = is_array($r['order'] ?? null) ? array_values($r['order']) : [];
+            $out[] = ['dim' => $dim, 'field_key' => $fieldKey, 'order' => $order];
+        }
+        return $out;
+    }
+
+    /** Valor de la tarea para una regla (string comparable). */
+    private function ruleValue(array $task, array $rule): string
+    {
+        return match ($rule['dim']) {
+            'directory_field' => (string) ($task['custom_fields'][$rule['field_key']] ?? ''),
+            'device_type'     => (string) $task['device_type_id'],
+            'activity_type'   => (string) $task['activity_type_id'],
+            default           => '',
+        };
+    }
+
+    /** Etiqueta legible del valor de la tarea para la "ruta" mostrada. */
+    private function ruleLabel(array $task, array $rule): string
+    {
+        return match ($rule['dim']) {
+            'directory_field' => (string) ($task['custom_fields'][$rule['field_key']] ?? '—'),
+            'device_type'     => $task['device_type_label'],
+            'activity_type'   => $task['activity_type_label'],
+            default           => '',
+        };
+    }
+
+    /** Ordena las tareas por la lista de reglas (la primera manda), con orden natural de respaldo. */
+    private function sortTasksByRules(array $tasks, array $rules): array
+    {
+        // Mapa valor→posición por regla (los no listados van al final, en orden natural).
+        $pos = [];
+        foreach ($rules as $i => $rule) {
+            $map = [];
+            foreach ($rule['order'] as $idx => $val) $map[(string) $val] = $idx;
+            $pos[$i] = $map;
+        }
+
+        usort($tasks, function ($a, $b) use ($rules, $pos) {
+            foreach ($rules as $i => $rule) {
+                $va = $this->ruleValue($a, $rule);
+                $vb = $this->ruleValue($b, $rule);
+                $pa = $pos[$i][$va] ?? PHP_INT_MAX;
+                $pb = $pos[$i][$vb] ?? PHP_INT_MAX;
+                if ($pa !== $pb) return $pa <=> $pb;
+                if ($va !== $vb) return strnatcasecmp($va, $vb);
+            }
+            // Desempate estable: dispositivo, luego actividad.
+            return [$a['device_id'], $a['activity_type_id']] <=> [$b['device_id'], $b['activity_type_id']];
+        });
+
+        return $tasks;
+    }
+
+    /** Ruta legible de la tarea según las reglas: "Torre 1 · Preventivo". */
+    private function taskPath(array $task, array $rules): string
+    {
+        if (empty($rules)) return '';
+        $parts = [];
+        foreach ($rules as $rule) {
+            $lbl = $this->ruleLabel($task, $rule);
+            $parts[] = ($lbl === '' ? '—' : $lbl);
+        }
+        return implode(' · ', $parts);
+    }
+
+    /**
+     * GET /maintenances/{maintenance}/action-plan/agenda-options
+     * Dimensiones disponibles para armar las reglas + las reglas guardadas.
+     */
+    public function agendaOptions(Maintenance $maintenance): JsonResponse
+    {
+        $this->authorize($maintenance);
+
+        $systemId = $maintenance->catalog_id;
+        $siteId   = $maintenance->site_id;
+
+        $devices = Device::whereHas('directory', fn ($q) =>
+                $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
+            )->where('is_active', true)->get(['id', 'device_type', 'custom_fields']);
+
+        // Campos del directorio ordenables (excluye tipos no discretos).
+        $skip = ['image', 'signature', 'did'];
+        $sysFields = \App\Models\SystemField::where('catalog_id', $systemId)
+            ->where('is_active', true)
+            ->whereNotIn('field_type', $skip)
+            ->orderBy('sort_order')->get(['label', 'field_key', 'field_type']);
+
+        $directoryFields = [];
+        foreach ($sysFields as $f) {
+            $vals = $devices
+                ->map(fn ($d) => is_array($d->custom_fields) ? ($d->custom_fields[$f->field_key] ?? null) : null)
+                ->filter(fn ($v) => $v !== null && $v !== '' && ! is_array($v))
+                ->map(fn ($v) => (string) $v)
+                ->unique()->values()->all();
+            usort($vals, 'strnatcasecmp');
+            $count = count($vals);
+            if ($count < 1) continue;                          // sin valores → no aporta orden
+            // Alta cardinalidad (ej. "área"): el front NO arrastra todo; el usuario elige valores
+            // a priorizar con un buscador y el resto queda en orden natural. Se acota el payload.
+            $truncated = $count > self::MAX_VALUES_SENT;
+            if ($truncated) $vals = array_slice($vals, 0, self::MAX_VALUES_SENT);
+            $directoryFields[] = [
+                'field_key'        => $f->field_key,
+                'label'            => $f->label,
+                'values'           => $vals,
+                'value_count'      => $count,
+                'high_cardinality' => $count > self::HIGH_CARD_THRESHOLD,
+                'values_truncated' => $truncated,
+            ];
+        }
+
+        // Tipos de dispositivo presentes.
+        $system    = Catalog::findOrFail($systemId);
+        $typeById  = $system->deviceTypes()->orderBy('catalogs.label')->pluck('catalogs.label', 'catalogs.id');
+        $presentLabels = $devices->pluck('device_type')->unique();
+        $deviceTypes = [];
+        foreach ($typeById as $id => $label) {
+            if ($presentLabels->contains($label)) $deviceTypes[] = ['id' => (int) $id, 'label' => $label];
+        }
+
+        // Tipos de actividad enlazados al sistema.
+        $linkedTypeIds = DB::table('activity_type_systems')->where('system_id', $systemId)->pluck('activity_type_id');
+        $activityTypes = Catalog::whereIn('id', $linkedTypeIds)
+            ->where('type', Catalog::TYPE_ACTIVITY_TYPE)->where('is_active', true)
+            ->orderBy('label')->get(['id', 'label'])
+            ->map(fn ($c) => ['id' => (int) $c->id, 'label' => $c->label])->values();
+
+        return response()->json([
+            'directory_fields' => $directoryFields,
+            'device_types'     => $deviceTypes,
+            'activity_types'   => $activityTypes,
+            'rules'            => $this->normalizeRules($maintenance->agenda_rules['rules'] ?? []),
+        ]);
+    }
+
+    /** PUT /maintenances/{maintenance}/action-plan/rules — guarda las reglas de orden. */
+    public function saveRules(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        $this->authorize($maintenance);
+
+        $request->validate([
+            'rules'             => 'present|array',
+            'rules.*.dim'       => 'required|in:' . implode(',', self::RULE_DIMS),
+            'rules.*.field_key' => 'nullable|string|max:60',
+            'rules.*.order'     => 'nullable|array',
+        ]);
+
+        $rules = $this->normalizeRules($request->input('rules', []));
+        $maintenance->update(['agenda_rules' => empty($rules) ? null : ['rules' => $rules]]);
+
+        return response()->json(['message' => 'Reglas de orden guardadas.', 'rules' => $rules]);
     }
 
     /**
@@ -184,7 +381,8 @@ class MaintenanceActionPlanController extends Controller
         // ── Dispositivos del sistema en el sitio, por tipo ────────────────────
         $devices = Device::whereHas('directory', fn ($q) =>
                 $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
-            )->where('is_active', true)->get(['id', 'device_type']);
+            )->where('is_active', true)->get(['id', 'name', 'device_type', 'custom_fields']);
+        $deviceMap = $devices->keyBy('id');
 
         $system      = Catalog::findOrFail($systemId);
         $deviceTypes = $system->deviceTypes()->orderBy('catalogs.label')->get(['catalogs.id', 'catalogs.label']);
@@ -252,6 +450,7 @@ class MaintenanceActionPlanController extends Controller
         $byActivity = [];   // at => [...]
         $byType     = [];   // dt => [...]
         $devicePending = []; // device_id => minutos pendientes
+        $tasks = [];         // tareas pendientes (dispositivo × actividad) para la agenda
         $totalRequired = 0; $totalDone = 0; $totalRemaining = 0;
         $totalMinutes = 0;  $remainingMinutes = 0;
         $missingDurations = [];
@@ -281,8 +480,23 @@ class MaintenanceActionPlanController extends Controller
                 foreach ($ids as $did) {
                     $d = min($doneByDeviceType["{$did}:{$at->id}"] ?? 0, $K);
                     $done += $d;
-                    $pend = max(0, $K - $d) * $min;
-                    if ($pend > 0) $devicePending[$did] = ($devicePending[$did] ?? 0) + $pend;
+                    $occ  = max(0, $K - $d);
+                    $pend = $occ * $min;
+                    if ($pend > 0) {
+                        $devicePending[$did] = ($devicePending[$did] ?? 0) + $pend;
+                        $dev = $deviceMap[$did] ?? null;
+                        $tasks[] = [
+                            'device_id'           => (int) $did,
+                            'device_name'         => $dev->name ?? ('#' . $did),
+                            'device_type_id'      => (int) $dt->id,
+                            'device_type_label'   => $typeLabel[$dt->id],
+                            'activity_type_id'    => (int) $at->id,
+                            'activity_type_label' => $activityLabel[$at->id],
+                            'minutes'             => $pend,
+                            'occurrences'         => $occ,
+                            'custom_fields'       => is_array($dev->custom_fields ?? null) ? $dev->custom_fields : [],
+                        ];
+                    }
                 }
                 $remaining = max(0, $required - $done);
 
@@ -372,8 +586,9 @@ class MaintenanceActionPlanController extends Controller
             'by_activity' => array_values($byActivity),
             'by_device_type' => array_values($byType),
             'missing_durations' => $missingDurations,
-            // Uso interno para la agenda (Fase 4):
+            // Uso interno para la agenda:
             'devices_pending' => $devicePending,
+            'pending_tasks'   => $tasks,
         ];
     }
 }

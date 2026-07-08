@@ -28,13 +28,18 @@ class EventTypeField extends Model
         'max_length',
         'sort_order',
         'is_active',
+        'show_in_report',
     ];
+
+    // Tipos de campo explotables como KPI/filtro en el Reporte de eventos.
+    public const REPORTABLE_TYPES = ['boolean', 'list', 'multiselect', 'scale', 'number', 'currency'];
 
     protected function casts(): array
     {
         return [
-            'is_required' => 'boolean',
-            'is_active'   => 'boolean',
+            'is_required'    => 'boolean',
+            'is_active'      => 'boolean',
+            'show_in_report' => 'boolean',
             'max_length'  => 'integer',
             'sort_order'  => 'integer',
             'rules'       => 'array',
