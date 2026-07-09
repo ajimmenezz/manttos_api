@@ -1,0 +1,5 @@
+@extends('brand')
+@section('title', 'Error del servidor · Mantenimientos')
+@section('code', $exception->getStatusCode())
+@section('heading', 'Algo salió mal')
+@section('message', 'Ocurrió un error en el servidor del Sistema de Mantenimientos. Inténtalo de nuevo en unos minutos.')

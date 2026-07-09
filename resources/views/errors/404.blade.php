@@ -1,0 +1,5 @@
+@extends('brand')
+@section('title', 'Página no encontrada · Mantenimientos')
+@section('code', '404')
+@section('heading', 'Página no encontrada')
+@section('message', 'La dirección que buscas no existe en el Sistema de Mantenimientos. Revisa la URL o vuelve a la aplicación.')

@@ -1,0 +1,5 @@
+@extends('brand')
+@section('title', 'Solicitud no válida · Mantenimientos')
+@section('code', $exception->getStatusCode())
+@section('heading', 'Solicitud no válida')
+@section('message', 'No se pudo procesar la solicitud en el Sistema de Mantenimientos. Revisa la dirección o vuelve a la aplicación.')

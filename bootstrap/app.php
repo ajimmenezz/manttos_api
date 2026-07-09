@@ -49,4 +49,26 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
 
+        // 404 — ruta/recurso inexistente. Para peticiones a la API (o que esperan JSON)
+        // devolvemos un mensaje ad-hoc del proyecto; el navegador ve la vista branded
+        // resources/views/errors/404.blade.php.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $_, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'message' => 'El recurso solicitado no existe en la API del Sistema de Mantenimientos.',
+                    'status'  => 404,
+                ], 404);
+            }
+        });
+
+        // 405 — método HTTP no permitido para la ruta.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException $_, Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'message' => 'El método HTTP no está permitido para esta ruta de la API del Sistema de Mantenimientos.',
+                    'status'  => 405,
+                ], 405);
+            }
+        });
+
     })->create();

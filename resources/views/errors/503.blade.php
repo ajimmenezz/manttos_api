@@ -1,0 +1,5 @@
+@extends('brand')
+@section('title', 'En mantenimiento · Mantenimientos')
+@section('code', '503')
+@section('heading', 'En mantenimiento')
+@section('message', 'El sistema está temporalmente fuera de servicio por tareas de mantenimiento. Volveremos en breve.')
