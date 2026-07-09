@@ -447,6 +447,11 @@ class MaintenanceActionPlanController extends Controller
             )->where('is_active', true)->get(['id', 'name', 'device_type', 'custom_fields']);
         $deviceMap = $devices->keyBy('id');
 
+        // Clave del campo DID del sistema (para etiquetar la tarea con el identificador
+        // del dispositivo, no con su tipo). Fallback a la clave sembrada 'did'.
+        $didKey = \App\Models\SystemField::where('catalog_id', $systemId)
+            ->where('field_type', 'did')->where('is_active', true)->value('field_key') ?? 'did';
+
         $system      = Catalog::findOrFail($systemId);
         $deviceTypes = $system->deviceTypes()->orderBy('catalogs.label')->get(['catalogs.id', 'catalogs.label']);
         $labelToId   = $deviceTypes->pluck('id', 'label');
@@ -548,16 +553,22 @@ class MaintenanceActionPlanController extends Controller
                     if ($pend > 0) {
                         $devicePending[$did] = ($devicePending[$did] ?? 0) + $pend;
                         $dev = $deviceMap[$did] ?? null;
+                        $cf  = is_array($dev->custom_fields ?? null) ? $dev->custom_fields : [];
+                        // Etiqueta = DID (identificador). Respaldo: nombre del dispositivo, luego #id.
+                        $didVal = $cf[$didKey] ?? null;
+                        $label = ($didVal !== null && $didVal !== '' && ! is_array($didVal))
+                            ? (string) $didVal
+                            : ($dev->name ?? ('#' . $did));
                         $tasks[] = [
                             'device_id'           => (int) $did,
-                            'device_name'         => $dev->name ?? ('#' . $did),
+                            'device_name'         => $label,
                             'device_type_id'      => (int) $dt->id,
                             'device_type_label'   => $typeLabel[$dt->id],
                             'activity_type_id'    => (int) $at->id,
                             'activity_type_label' => $activityLabel[$at->id],
                             'minutes'             => $pend,
                             'occurrences'         => $occ,
-                            'custom_fields'       => is_array($dev->custom_fields ?? null) ? $dev->custom_fields : [],
+                            'custom_fields'       => $cf,
                         ];
                     }
                 }
