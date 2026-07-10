@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\MaintenanceActivityFilters;
 use App\Models\ActivityTypeField;
 use App\Models\Catalog;
 use App\Models\Maintenance;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 
 class MaintenanceDashboardController extends Controller
 {
+    use MaintenanceActivityFilters;
+
     private function authorizeAccess(Maintenance $maintenance): void
     {
         $user = request()->user();
@@ -47,36 +50,19 @@ class MaintenanceDashboardController extends Controller
         $dateTo   = $request->filled('date_to')
             ? Carbon::parse($request->date_to)->endOfDay()     : null;
 
-        // field_FIELDKEY=value  →  ['fieldKey' => 'value', ...]
-        $fieldFilters = collect($request->all())
-            ->filter(fn ($v, $k) => str_starts_with($k, 'field_') && $v !== '' && $v !== null)
-            ->mapWithKeys(fn ($v, $k) => [substr($k, 6) => $v]);
+        $filters = $this->parseMaintenanceFilters($request);
 
-        // ── Dispositivos del sistema en este sitio (aplicar filtros de campo) ─
-        $deviceQuery = Device::whereHas('directory', fn ($q) =>
+        // ── Universo base (sin filtros de campo): dispositivos y actividades ──
+        $baseDeviceQuery = Device::whereHas('directory', fn ($q) =>
             $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
         )->where('is_active', true);
 
-        foreach ($fieldFilters as $key => $value) {
-            $deviceQuery->whereRaw("custom_fields->>? = ?", [$key, $value]);
-        }
+        $baseDevices = (clone $baseDeviceQuery)->get(['id', 'custom_fields']);
 
-        $deviceIds    = $deviceQuery->pluck('id');
-        $totalDevices = $deviceIds->count();
-
-        // ── Actividades del mantenimiento (filtradas por dispositivo y fecha) ──
-        $actQuery = MaintenanceActivity::where('maintenance_id', $maintId)
+        $baseActivities = MaintenanceActivity::where('maintenance_id', $maintId)
             ->select('id', 'device_id', 'activity_type_id', 'user_id', 'field_values', 'performed_at')
-            ->whereIn('device_id', $deviceIds);
-
-        if ($dateFrom) $actQuery->where('performed_at', '>=', $dateFrom);
-        if ($dateTo)   $actQuery->where('performed_at', '<=', $dateTo);
-
-        $activities = $actQuery->get();
-
-        $totalActivities   = $activities->count();
-        $coveredDeviceIds  = $activities->pluck('device_id')->unique();
-        $coveredCount      = $coveredDeviceIds->count();
+            ->whereIn('device_id', $baseDevices->pluck('id'))
+            ->get();
 
         // Tipos de actividad activos y vinculados al sistema
         $linkedTypeIds = DB::table('activity_type_systems')
@@ -85,6 +71,27 @@ class MaintenanceDashboardController extends Controller
             ->where('type', Catalog::TYPE_ACTIVITY_TYPE)
             ->where('is_active', true)
             ->get(['id', 'label']);
+
+        // Metadatos de filtros disponibles (directorio + formulario) sobre el universo base
+        $filterMeta = $this->maintenanceFilterMeta($systemId, $baseDevices, $baseActivities, $activityTypes);
+
+        // ── Dispositivos en scope (aplicar filtros de directorio) ─────────────
+        $this->applyDirectoryFilters($baseDeviceQuery, $filters['dir'], $filterMeta['dir_modes']);
+        $deviceIds    = $baseDeviceQuery->pluck('id');
+        $deviceIdSet  = array_flip($deviceIds->all());
+        $totalDevices = $deviceIds->count();
+
+        // ── Actividades en scope: dispositivo + fecha + filtros de formulario ─
+        $activities = $baseActivities
+            ->filter(fn ($a) => isset($deviceIdSet[$a->device_id]))
+            ->filter(fn ($a) => (!$dateFrom || Carbon::parse($a->performed_at)->gte($dateFrom))
+                             && (!$dateTo   || Carbon::parse($a->performed_at)->lte($dateTo)))
+            ->filter(fn ($a) => $this->activityPassesFormFilters($a, $filters['form'], $filterMeta['form_modes']))
+            ->values();
+
+        $totalActivities   = $activities->count();
+        $coveredDeviceIds  = $activities->pluck('device_id')->unique();
+        $coveredCount      = $coveredDeviceIds->count();
 
         // ── Cobertura por tipo de actividad ───────────────────────────────────
         $coverageByType = $activityTypes->map(function ($type) use ($activities, $totalDevices) {
@@ -132,42 +139,11 @@ class MaintenanceDashboardController extends Controller
         }
 
         // ── Agrupaciones por campos del directorio marcados para dashboard ────
-        $systemFields = SystemField::where('catalog_id', $systemId)
-            ->where('is_active', true)
-            ->where('show_in_dashboard', true)
-            ->orderBy('sort_order')
-            ->get(['id', 'label', 'field_key', 'field_type']);
-
-        // Cargar custom_fields de todos los dispositivos activos
-        $devices = Device::whereIn('id', $deviceIds)
-            ->select('id', 'custom_fields')
-            ->get();
+        // Cargar custom_fields de los dispositivos en scope (para los desgloses BI)
+        $devices = $baseDevices->whereIn('id', $deviceIds->all())->values();
 
         $fieldBreakdowns = $this->buildFieldBreakdowns($systemId, $devices, $coveredDeviceIds);
         $formBreakdowns  = $this->buildFormBreakdowns($systemId, $activities, $activityTypes);
-
-        // ── Opciones de filtro por campo (valores únicos dentro del scope actual) ─
-        $filterOptions = [];
-        foreach ($systemFields as $field) {
-            $key    = $field->field_key;
-            $unique = $devices
-                ->map(fn ($d) => (isset($d->custom_fields[$key]) && $d->custom_fields[$key] !== '')
-                    ? (string) $d->custom_fields[$key]
-                    : null
-                )
-                ->filter()
-                ->unique()
-                ->sort()
-                ->values();
-
-            if ($unique->isEmpty()) continue;
-
-            $filterOptions[] = [
-                'field_key' => $key,
-                'label'     => $field->label,
-                'values'    => $unique,
-            ];
-        }
 
         // ── Días transcurridos ────────────────────────────────────────────────
         $startDate  = Carbon::parse($maintenance->start_date);
@@ -192,7 +168,7 @@ class MaintenanceDashboardController extends Controller
             'by_engineer'        => $byEngineer,
             'weekly'             => $weekly,
             'field_breakdowns'   => $fieldBreakdowns,
-            'filter_options'     => $filterOptions,
+            'available_filters'  => $filterMeta['available'],
             'form_breakdowns'    => $formBreakdowns,
         ]);
     }

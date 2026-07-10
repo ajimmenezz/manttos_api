@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\MaintenanceActivityFilters;
 use App\Models\AppSetting;
 use App\Models\Catalog;
 use App\Models\Device;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 
 class MaintenanceActivityController extends Controller
 {
+    use MaintenanceActivityFilters;
+
     /**
      * Resuelve la fecha de ejecución respetando el flag global. Si la captura manual
      * está apagada (o no viene fecha), usa la del momento ($fallback). Si está prendida
@@ -234,17 +237,44 @@ class MaintenanceActivityController extends Controller
         $this->authorizeAccess($maintenance);
 
         $validated = $request->validate([
-            'date_from' => 'nullable|date',
-            'date_to'   => 'nullable|date|after_or_equal:date_from',
+            'date_from'    => 'nullable|date',
+            'date_to'      => 'nullable|date|after_or_equal:date_from',
+            'dir_filters'  => 'nullable',
+            'form_filters' => 'nullable',
         ]);
 
-        $query = MaintenanceActivity::where('maintenance_id', $maintenance->id);
-        if (!empty($validated['date_from'])) {
-            $query->whereDate('performed_at', '>=', $validated['date_from']);
-        }
-        if (!empty($validated['date_to'])) {
-            $query->whereDate('performed_at', '<=', $validated['date_to']);
-        }
+        $systemId = $maintenance->catalog_id;
+        $siteId   = $maintenance->site_id;
+        $filters  = $this->parseMaintenanceFilters($request);
+
+        // ── Universo base (para metadatos de filtros disponibles) ─────────────
+        $baseDeviceQuery = Device::whereHas('directory', fn ($q) =>
+            $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
+        )->where('is_active', true);
+        $baseDevices = (clone $baseDeviceQuery)->get(['id', 'custom_fields']);
+
+        $baseActivities = MaintenanceActivity::where('maintenance_id', $maintenance->id)
+            ->select('id', 'device_id', 'activity_type_id', 'field_values')
+            ->whereIn('device_id', $baseDevices->pluck('id'))
+            ->get();
+
+        $linkedTypeIds = DB::table('activity_type_systems')->where('system_id', $systemId)->pluck('activity_type_id');
+        $activityTypes = Catalog::whereIn('id', $linkedTypeIds)
+            ->where('type', Catalog::TYPE_ACTIVITY_TYPE)->where('is_active', true)
+            ->get(['id', 'label']);
+
+        $filterMeta = $this->maintenanceFilterMeta($systemId, $baseDevices, $baseActivities, $activityTypes);
+
+        // ── Dispositivos en scope (filtros de directorio) ─────────────────────
+        $this->applyDirectoryFilters($baseDeviceQuery, $filters['dir'], $filterMeta['dir_modes']);
+        $scopedDeviceIds = $baseDeviceQuery->pluck('id');
+
+        // ── Actividades: fecha + dispositivo en scope ─────────────────────────
+        $query = MaintenanceActivity::where('maintenance_id', $maintenance->id)
+            ->whereIn('device_id', $scopedDeviceIds);
+        if (!empty($validated['date_from'])) $query->whereDate('performed_at', '>=', $validated['date_from']);
+        if (!empty($validated['date_to']))   $query->whereDate('performed_at', '<=', $validated['date_to']);
+
         $activities = $query->with([
                 'activityType:id,label',
                 'user:id,name',
@@ -253,8 +283,10 @@ class MaintenanceActivityController extends Controller
             ])
             ->orderBy('performed_at')
             ->orderBy('id')
-            ->get();
-
+            ->get()
+            // Filtros de formulario (por tipo) — en memoria sobre field_values
+            ->filter(fn ($a) => $this->activityPassesFormFilters($a, $filters['form'], $filterMeta['form_modes']))
+            ->values();
 
         $result = $activities->map(fn ($act) => [
             'id'            => $act->id,
@@ -272,7 +304,10 @@ class MaintenanceActivityController extends Controller
             ] : null,
         ]);
 
-        return response()->json($result);
+        return response()->json([
+            'entries'           => $result,
+            'available_filters' => $filterMeta['available'],
+        ]);
     }
 
     /** PUT /maintenances/{maintenance}/activities/{activity} */
