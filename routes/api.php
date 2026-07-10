@@ -199,6 +199,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put(   "{$planBase}/{floorPlan}",                  [FloorPlanController::class, 'update']);
     Route::delete("{$planBase}/{floorPlan}",                  [FloorPlanController::class, 'destroy']);
     Route::post(  "{$planBase}/{floorPlan}/toggle-status",    [FloorPlanController::class, 'toggleStatus']);
+    Route::put(   "{$planBase}/{floorPlan}/directory-filter",  [FloorPlanController::class, 'saveDirectoryFilter']);
     Route::post(  "{$planBase}/{floorPlan}/placements",       [FloorPlanController::class, 'savePlacements']);
     Route::delete("{$planBase}/{floorPlan}/placements",       [FloorPlanController::class, 'clearPlacements']);
     Route::delete("{$planBase}/{floorPlan}/placements/{device}", [FloorPlanController::class, 'deletePlacement']);
@@ -263,6 +264,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/dashboard',       [EventDashboardController::class, 'show']); // antes del wildcard {event}
     Route::get('/events/export',          [EventDashboardController::class, 'export']); // antes del wildcard {event}
     Route::get('/events/report-list',     [EventDashboardController::class, 'reportList']); // antes del wildcard {event}
+    Route::get('/events/plan-devices',    [EventDashboardController::class, 'planDevices']); // antes del wildcard {event}
 
     // Preferencias de UI por usuario (clave→JSON): p. ej. columnas del reporte de eventos
     Route::get('/me/preferences/{key}',   [UserPreferenceController::class, 'show']);

@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\Device;
 use App\Models\DevicePlacement;
+use App\Models\Directory;
 use App\Models\FloorPlan;
+use App\Models\FloorPlanDirectoryFilter;
 use App\Models\Site;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -97,10 +99,63 @@ class FloorPlanController extends Controller
                 'custom_fields'=> $pl->device?->custom_fields,
             ]);
 
+        // Filtro fijo del plano para este directorio (si se pidió directory_id)
+        $directoryFilters = (object) [];
+        if ($request->filled('directory_id')) {
+            $row = FloorPlanDirectoryFilter::where('floor_plan_id', $floorPlan->id)
+                ->where('directory_id', $request->integer('directory_id'))
+                ->first();
+            if ($row && is_array($row->filters) && !empty($row->filters)) {
+                $directoryFilters = $row->filters;
+            }
+        }
+
         return response()->json([
             ...$this->serialize($floorPlan),
-            'placements' => $placements,
+            'placements'        => $placements,
+            'directory_filters' => $directoryFilters,
         ]);
+    }
+
+    /**
+     * Guarda el filtro fijo del plano para un directorio: los dispositivos que
+     * "pertenecen" a este plano según campos del directorio. `filters` =
+     * { field_key: ["v1","v2"], ... }. Vacío = sin filtro fijo (se elimina la fila).
+     */
+    public function saveDirectoryFilter(Request $request, Client $client, Site $site, FloorPlan $floorPlan): JsonResponse
+    {
+        $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($floorPlan->site_id === $site->id, 404);
+
+        $data = $request->validate([
+            'directory_id' => 'required|integer',
+            'filters'      => 'nullable|array',
+            'filters.*'    => 'array',   // cada campo → lista de valores
+        ]);
+
+        abort_unless(
+            Directory::where('id', $data['directory_id'])->where('site_id', $site->id)->exists(),
+            404, 'El directorio no pertenece a este sitio.'
+        );
+
+        // Limpia: descarta campos con lista vacía y valores vacíos.
+        $filters = collect($data['filters'] ?? [])
+            ->map(fn ($vals) => collect($vals)->filter(fn ($v) => $v !== '' && $v !== null)->values()->all())
+            ->filter(fn ($vals) => count($vals) > 0)
+            ->all();
+
+        if (empty($filters)) {
+            FloorPlanDirectoryFilter::where('floor_plan_id', $floorPlan->id)
+                ->where('directory_id', $data['directory_id'])->delete();
+            return response()->json(['message' => 'Filtro del plano quitado.', 'directory_filters' => (object) []]);
+        }
+
+        FloorPlanDirectoryFilter::updateOrCreate(
+            ['floor_plan_id' => $floorPlan->id, 'directory_id' => $data['directory_id']],
+            ['filters' => $filters],
+        );
+
+        return response()->json(['message' => 'Filtro del plano guardado.', 'directory_filters' => $filters]);
     }
 
     public function update(Request $request, Client $client, Site $site, FloorPlan $floorPlan): JsonResponse

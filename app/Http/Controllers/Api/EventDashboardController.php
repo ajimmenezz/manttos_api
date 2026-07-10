@@ -9,6 +9,7 @@ use App\Models\Event;
 use App\Models\EventStatus;
 use App\Models\EventType;
 use App\Models\EventTypeField;
+use App\Models\FloorPlan;
 use App\Models\SystemField;
 use App\Support\EventSla;
 use Carbon\Carbon;
@@ -852,6 +853,107 @@ class EventDashboardController extends Controller
         );
     }
 
+    /**
+     * Vista de plano del reporte: para un sitio, sus planos con SOLO los dispositivos
+     * sembrados que tienen eventos en el conjunto filtrado (respeta todos los filtros
+     * del reporte). Cada dispositivo trae el resumen de su evento representativo (el más
+     * reciente) para pintar relleno=color del tipo · anillo=color del estado.
+     */
+    public function planDevices(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('events.view'), 403);
+        $request->validate(['site_id' => 'required|integer']);
+
+        $events = $this->filteredEventsForPlan($request)->filter(fn ($e) => $e->device_id !== null);
+
+        // Agregación por dispositivo (representativo = evento más reciente)
+        $byDevice = $events->groupBy('device_id')->map(function ($grp) {
+            $latest = $grp->sortByDesc(fn ($e) => $e->occurred_at ?? $e->created_at)->first();
+            return [
+                'count'        => $grp->count(),
+                'event_type'   => $latest->eventType?->label,
+                'event_color'  => $latest->eventType?->color ?? '#6b7280',
+                'status_label' => $latest->status?->label,
+                'status_color' => $latest->status?->color ?? '#6b7280',
+                'priority'     => $latest->priority,
+                'folio'        => $latest->folio,
+            ];
+        });
+
+        $deviceIds = $byDevice->keys();
+
+        $plans = FloorPlan::where('site_id', $request->site_id)
+            ->where('is_active', true)
+            ->with(['placements' => fn ($q) => $q
+                ->whereIn('device_id', $deviceIds)
+                ->with('device:id,name,device_type,custom_fields')])
+            ->orderBy('sort_order')->orderBy('id')
+            ->get()
+            ->map(fn (FloorPlan $p) => [
+                'id'           => $p->id,
+                'name'         => $p->name,
+                'image_url'    => $p->image_url,
+                'image_width'  => $p->image_width,
+                'image_height' => $p->image_height,
+                'placements'   => $p->placements->map(fn ($pl) => [
+                    'device_id'     => $pl->device_id,
+                    'x'             => (float) $pl->x,
+                    'y'             => (float) $pl->y,
+                    'name'          => $pl->device?->name,
+                    'device_type'   => $pl->device?->device_type,
+                    'custom_fields' => $pl->device?->custom_fields,
+                    'events'        => $byDevice->get($pl->device_id),
+                ])->values(),
+            ]);
+
+        return response()->json([
+            'plans'         => $plans,
+            'with_events'   => $deviceIds->count(),
+            'total_events'  => $events->count(),
+        ]);
+    }
+
+    /** Conjunto de eventos filtrado (mismo pipeline que show) para la vista de plano. */
+    private function filteredEventsForPlan(Request $request)
+    {
+        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
+        $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
+
+        $base = Event::query()
+            ->when($request->filled('client_id'),     fn ($q) => $q->where('events.client_id', $request->client_id))
+            ->when($request->filled('site_id'),       fn ($q) => $q->where('events.site_id', $request->site_id))
+            ->when($request->filled('system_id'),     fn ($q) => $q->where('events.system_id', $request->system_id))
+            ->when($request->filled('event_type_id'), fn ($q) => $q->where('events.event_type_id', $request->event_type_id))
+            ->when($request->filled('status_id'),     fn ($q) => $q->where('events.status_id', $request->status_id))
+            ->when($request->filled('priority'),      fn ($q) => $q->where('events.priority', $request->priority))
+            ->when($dateFrom, fn ($q) => $q->whereRaw('COALESCE(events.occurred_at, events.created_at) >= ?', [$dateFrom]))
+            ->when($dateTo,   fn ($q) => $q->whereRaw('COALESCE(events.occurred_at, events.created_at) <= ?', [$dateTo]));
+        $this->scopeEvents($request, $base);
+
+        if ($request->filled('nature')) {
+            $typeIds = EventType::where('nature', $request->nature)->pluck('id');
+            $base->whereIn('events.event_type_id', $typeIds);
+        }
+
+        $events = (clone $base)
+            ->with(['status:id,label,color', 'eventType:id,label,color,nature', 'device:id,custom_fields'])
+            ->get(['id', 'client_id', 'site_id', 'system_id', 'event_type_id', 'device_id', 'status_id',
+                   'priority', 'folio', 'occurred_at', 'created_at', 'field_values']);
+
+        $reportFields = $this->reportFieldDefs();
+        $fieldFilters = $this->parseFieldFilters($request);
+        if (! empty($fieldFilters)) {
+            $events = $events->filter(fn ($e) => $this->eventMatchesFieldFilters($e, $fieldFilters, $reportFields))->values();
+        }
+        $dirDefsAll = $this->directoryFieldDefs($events, false);
+        $dirFilters = $this->parseDirFilters($request);
+        if (! empty($dirFilters)) {
+            $events = $events->filter(fn ($e) => $this->eventMatchesDirFilters($e, $dirFilters, $dirDefsAll))->values();
+        }
+
+        return $events;
+    }
+
     /** Opciones para los selects de filtro (derivadas del universo scopeado, sin los filtros activos). */
     private function filterOptions(Request $request): array
     {
@@ -864,12 +966,18 @@ class EventDashboardController extends Controller
             ->map(fn ($c) => ['id' => $c->id, 'name' => $c->short_name ?: $c->name])
             ->sortBy('name')->values();
 
-        $sites = Event::whereIn('id', $ids)->with('site:id,name')->get()
+        // Sitios y sistemas: si hay un client_id fijo (contexto de cliente), se acotan a
+        // ese cliente para que el dropdown de sitios no muestre los de otros clientes.
+        $ctxIds = (clone $scoped)
+            ->when($request->filled('client_id'), fn ($q) => $q->where('events.client_id', $request->client_id))
+            ->pluck('events.id');
+
+        $sites = Event::whereIn('id', $ctxIds)->with('site:id,name')->get()
             ->pluck('site')->filter()->unique('id')
             ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
             ->sortBy('name')->values();
 
-        $systems = Event::whereIn('id', $ids)->with('system:id,label')->get()
+        $systems = Event::whereIn('id', $ctxIds)->with('system:id,label')->get()
             ->pluck('system')->filter()->unique('id')
             ->map(fn ($s) => ['id' => $s->id, 'label' => $s->label])
             ->sortBy('label')->values();
