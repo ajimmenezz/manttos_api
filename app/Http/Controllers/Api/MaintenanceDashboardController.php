@@ -189,11 +189,31 @@ class MaintenanceDashboardController extends Controller
         $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
         $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
 
-        // ── Dispositivos del sistema en el sitio, agrupados por tipo ──────────
-        $devices   = Device::whereHas('directory', fn ($q) =>
+        // ── Universo base + filtros por campo (directorio + formulario) ───────
+        $baseDeviceQuery = Device::whereHas('directory', fn ($q) =>
                 $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
-            )->where('is_active', true)->get(['id', 'device_type']);
-        $deviceIds = $devices->pluck('id');
+            )->where('is_active', true);
+        $baseDevices = (clone $baseDeviceQuery)->get(['id', 'device_type', 'custom_fields']);
+
+        $baseActivities = MaintenanceActivity::where('maintenance_id', $maintenance->id)
+            ->select('id', 'device_id', 'activity_type_id', 'user_id', 'field_values', 'performed_at')
+            ->whereIn('device_id', $baseDevices->pluck('id'))
+            ->get();
+
+        // Tipos de actividad enlazados al sistema
+        $linkedTypeIds = DB::table('activity_type_systems')->where('system_id', $systemId)->pluck('activity_type_id');
+        $activityTypes = Catalog::whereIn('id', $linkedTypeIds)
+            ->where('type', Catalog::TYPE_ACTIVITY_TYPE)->where('is_active', true)
+            ->orderBy('label')->get(['id', 'label']);
+
+        $filters    = $this->parseMaintenanceFilters($request);
+        $filterMeta = $this->maintenanceFilterMeta($systemId, $baseDevices, $baseActivities, $activityTypes);
+
+        // Dispositivos en scope (filtros de directorio); el "requerido" del contrato baja con ellos
+        $this->applyDirectoryFilters($baseDeviceQuery, $filters['dir'], $filterMeta['dir_modes']);
+        $deviceIds   = $baseDeviceQuery->pluck('id');
+        $deviceIdSet = array_flip($deviceIds->all());
+        $devices     = $baseDevices->whereIn('id', $deviceIds->all())->values();
 
         $system      = Catalog::findOrFail($systemId);
         $deviceTypes = $system->deviceTypes()->orderBy('catalogs.label')->get(['catalogs.id', 'catalogs.label']);
@@ -204,12 +224,6 @@ class MaintenanceDashboardController extends Controller
             $tid = $labelToId[$d->device_type] ?? null;
             if ($tid) $deviceIdsByType[$tid][] = $d->id;
         }
-
-        // Tipos de actividad enlazados al sistema
-        $linkedTypeIds = DB::table('activity_type_systems')->where('system_id', $systemId)->pluck('activity_type_id');
-        $activityTypes = Catalog::whereIn('id', $linkedTypeIds)
-            ->where('type', Catalog::TYPE_ACTIVITY_TYPE)->where('is_active', true)
-            ->orderBy('label')->get(['id', 'label']);
 
         // ── Frecuencias efectivas: base del catálogo + override del contrato ──
         $freq = []; // "dt:at" => ['value'=>?, 'unit'=>]
@@ -229,13 +243,13 @@ class MaintenanceDashboardController extends Controller
             default  => 0, // as_needed
         };
 
-        // ── Actividades (filtradas por fecha) ─────────────────────────────────
-        $actQuery = MaintenanceActivity::where('maintenance_id', $maintenance->id)
-            ->whereIn('device_id', $deviceIds)
-            ->select('id', 'device_id', 'activity_type_id', 'user_id', 'performed_at');
-        if ($dateFrom) $actQuery->where('performed_at', '>=', $dateFrom);
-        if ($dateTo)   $actQuery->where('performed_at', '<=', $dateTo);
-        $activities = $actQuery->get();
+        // ── Actividades en scope: dispositivo + fecha + filtros de formulario ─
+        $activities = $baseActivities
+            ->filter(fn ($a) => isset($deviceIdSet[$a->device_id]))
+            ->filter(fn ($a) => (!$dateFrom || Carbon::parse($a->performed_at)->gte($dateFrom))
+                             && (!$dateTo   || Carbon::parse($a->performed_at)->lte($dateTo)))
+            ->filter(fn ($a) => $this->activityPassesFormFilters($a, $filters['form'], $filterMeta['form_modes']))
+            ->values();
 
         // ── Matriz + agregados ────────────────────────────────────────────────
         $matrix = [];
@@ -355,8 +369,9 @@ class MaintenanceDashboardController extends Controller
             'on_demand'   => $onDemand,
             'by_engineer' => $byEngineer,
             'weekly'      => $weekly,
-            'field_breakdowns' => $this->buildFieldBreakdowns($systemId, Device::whereIn('id', $deviceIds)->get(['id', 'custom_fields']), $activities->pluck('device_id')->unique()),
+            'field_breakdowns' => $this->buildFieldBreakdowns($systemId, $devices, $activities->pluck('device_id')->unique()),
             'form_breakdowns'  => $this->buildFormBreakdowns($systemId, $activities, $activityTypes),
+            'available_filters' => $filterMeta['available'],
         ]);
     }
 
