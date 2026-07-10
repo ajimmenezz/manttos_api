@@ -409,6 +409,9 @@ class EventController extends Controller
         $site = Site::findOrFail($data['site_id']);
         abort_unless($this->userCanUseSite($request, $site), 403, 'No tienes acceso a este sitio.');
 
+        // Clave real del DID en este sistema (campo field_type='did'); fallback a 'did'.
+        $didKey = $this->didKeyFor($data['system_id'], $site->client_id);
+
         $q = \App\Models\Device::whereHas('directory', fn ($d) =>
                 $d->where('site_id', $data['site_id'])->where('catalog_id', $data['system_id'])->where('is_active', true)
             )->where('is_active', true);
@@ -418,7 +421,7 @@ class EventController extends Controller
             $q->where(fn ($w) => $w
                 ->where('name', 'ilike', "%{$search}%")
                 ->orWhere('location', 'ilike', "%{$search}%")
-                ->orWhereRaw("custom_fields->>'did' ilike ?", ["%{$search}%"]));
+                ->orWhereRaw('custom_fields->>? ilike ?', [$didKey, "%{$search}%"]));
         }
 
         $total   = (clone $q)->count();
@@ -427,16 +430,73 @@ class EventController extends Controller
 
         return response()->json([
             'devices' => $devices->map(fn ($d) => [
-                'id'          => $d->id,
-                'name'        => $d->name,
-                'device_type' => $d->device_type,
-                'location'    => $d->location,
-                'did'         => is_array($d->custom_fields) ? ($d->custom_fields['did'] ?? null) : null,
+                'id'            => $d->id,
+                'name'          => $d->name,
+                'device_type'   => $d->device_type,
+                'location'      => $d->location,
+                'did'           => is_array($d->custom_fields) ? ($d->custom_fields[$didKey] ?? null) : null,
+                'custom_fields' => is_array($d->custom_fields) ? $d->custom_fields : (object) [],
             ])->values(),
             'total'     => $total,
             'limit'     => $limit,
             'truncated' => $total > $limit,
         ]);
+    }
+
+    /**
+     * Definiciones de los campos del directorio de un sistema (para ligar dispositivo
+     * a un evento): etiqueta, clave y tipo, ordenados. Fuente única para el bloque de
+     * lectura de datos del directorio (detalle/alta/hoja de servicio).
+     */
+    public function directoryFields(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user->can('events.create') || $user->can('events.view'), 403);
+
+        $data = $request->validate([
+            'system_id' => 'required|exists:catalogs,id',
+            'client_id' => 'nullable|exists:clients,id',
+        ]);
+
+        return response()->json([
+            'fields' => $this->directoryFieldDefs($data['system_id'], $data['client_id'] ?? null),
+        ]);
+    }
+
+    /** Campos activos del directorio de un sistema (base + override por cliente), ordenados. */
+    private function directoryFieldDefs(int $systemId, ?int $clientId): array
+    {
+        $rows = \App\Models\SystemField::where('catalog_id', $systemId)
+            ->where('is_active', true)
+            ->when($clientId !== null,
+                fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)),
+                fn ($q) => $q->whereNull('client_id'))
+            ->orderBy('sort_order')->orderBy('id')
+            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'sort_order']);
+
+        // El override por cliente (client_id) gana sobre el base (client_id null) con la misma clave.
+        return $rows->sortBy(fn ($f) => $f->client_id === null ? 0 : 1)
+            ->keyBy('field_key')
+            ->sortBy('sort_order')
+            ->map(fn ($f) => [
+                'field_key'  => $f->field_key,
+                'label'      => $f->label,
+                'field_type' => $f->field_type,
+            ])->values()->all();
+    }
+
+    /** Clave del campo DID (field_type='did') del sistema; fallback 'did'. */
+    private function didKeyFor(int $systemId, ?int $clientId): string
+    {
+        $did = \App\Models\SystemField::where('catalog_id', $systemId)
+            ->where('field_type', 'did')
+            ->where('is_active', true)
+            ->when($clientId !== null,
+                fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)))
+            ->orderByRaw('client_id is null')
+            ->value('field_key');
+
+        return $did ?: 'did';
     }
 
     // ─── Formulario por (tipo, sistema) para el create ────────────

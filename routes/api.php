@@ -270,6 +270,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/sync-bundle',     [EventController::class, 'syncBundle']);  // antes del wildcard {event}
     Route::get('/events/sla-context',     [EventController::class, 'slaContext']);  // antes del wildcard {event}
     Route::get('/events/devices',         [EventController::class, 'deviceOptions']); // antes del wildcard {event}
+    Route::get('/events/directory-fields', [EventController::class, 'directoryFields']); // antes del wildcard {event}
     Route::post('/events',                [EventController::class, 'store']);
     Route::get('/events/{event}',         [EventController::class, 'show']);
     Route::put('/events/{event}',         [EventController::class, 'update']);
