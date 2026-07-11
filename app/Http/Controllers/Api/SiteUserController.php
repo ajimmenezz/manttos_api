@@ -11,9 +11,21 @@ use Illuminate\Http\Request;
 
 class SiteUserController extends Controller
 {
-    public function index(Client $client, Site $site): JsonResponse
+    /** superadmin/admin; admin-cliente del cliente padre; admin del propio sitio. */
+    private function authorizeSite(Request $request, Site $site): void
+    {
+        $user = $request->user();
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+        if ($user->hasRole('admin-cliente') && $user->clientsAsAdmin()->where('clients.id', $site->client_id)->exists()) return;
+        if ($user->hasRole('admin-sitio') && $site->admins()->where('users.id', $user->id)->exists()) return;
+        abort(403, 'No tienes acceso a este sitio.');
+    }
+
+    public function index(Request $request, Client $client, Site $site): JsonResponse
     {
         abort_unless($site->client_id === $client->id, 404);
+        $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-admins.view'), 403, 'No autorizado para esta acción.');
 
         $admins = $site->admins()
             ->with('roles')
@@ -33,6 +45,8 @@ class SiteUserController extends Controller
     public function store(Request $request, Client $client, Site $site): JsonResponse
     {
         abort_unless($site->client_id === $client->id, 404);
+        $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-admins.assign'), 403, 'No autorizado para esta acción.');
 
         $request->validate([
             'user_id' => 'required|exists:users,id',
@@ -62,9 +76,11 @@ class SiteUserController extends Controller
         ], 201);
     }
 
-    public function destroy(Client $client, Site $site, User $user): JsonResponse
+    public function destroy(Request $request, Client $client, Site $site, User $user): JsonResponse
     {
         abort_unless($site->client_id === $client->id, 404);
+        $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-admins.remove'), 403, 'No autorizado para esta acción.');
 
         if (! $site->admins()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'El usuario no está asignado a este sitio.'], 404);
@@ -78,6 +94,8 @@ class SiteUserController extends Controller
     public function candidates(Request $request, Client $client, Site $site): JsonResponse
     {
         abort_unless($site->client_id === $client->id, 404);
+        $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-admins.assign'), 403, 'No autorizado para esta acción.');
 
         $assigned = $site->admins()->pluck('users.id');
 

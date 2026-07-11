@@ -11,9 +11,9 @@ use Illuminate\Http\Request;
 
 class ClientSystemFieldController extends Controller
 {
-    private function ensureSuperAdmin(Request $request): void
+    private function ensureCanManage(Request $request): void
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadmin puede gestionar plantillas personalizadas de cliente.');
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
     }
 
     private function resolveSystem(Catalog $system): void
@@ -35,7 +35,7 @@ class ClientSystemFieldController extends Controller
 
     public function systemsWithTemplates(Request $request, Client $client): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
 
         // Sistemas que tienen al menos un campo base activo
         $systems = Catalog::where('type', Catalog::TYPE_SYSTEM)
@@ -72,7 +72,7 @@ class ClientSystemFieldController extends Controller
 
     public function index(Request $request, Client $client, Catalog $system): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
 
         $fields = SystemField::where('catalog_id', $system->id)
@@ -86,7 +86,7 @@ class ClientSystemFieldController extends Controller
 
     public function store(Request $request, Client $client, Catalog $system): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
         $this->ensureBaseTemplateExists($system);
 
@@ -137,7 +137,7 @@ class ClientSystemFieldController extends Controller
 
     public function update(Request $request, Client $client, Catalog $system, SystemField $field): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
         abort_unless($field->catalog_id === $system->id && $field->client_id === $client->id, 404);
 
@@ -159,7 +159,7 @@ class ClientSystemFieldController extends Controller
 
     public function toggleStatus(Request $request, Client $client, Catalog $system, SystemField $field): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
         abort_unless($field->catalog_id === $system->id && $field->client_id === $client->id, 404);
 
@@ -171,7 +171,7 @@ class ClientSystemFieldController extends Controller
 
     public function toggleDashboard(Request $request, Client $client, Catalog $system, SystemField $field): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
         abort_unless($field->catalog_id === $system->id && $field->client_id === $client->id, 404);
 
@@ -183,7 +183,7 @@ class ClientSystemFieldController extends Controller
 
     public function destroy(Request $request, Client $client, Catalog $system, SystemField $field): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
         abort_unless($field->catalog_id === $system->id && $field->client_id === $client->id, 404);
 
@@ -212,7 +212,7 @@ class ClientSystemFieldController extends Controller
 
     public function reorder(Request $request, Client $client, Catalog $system): JsonResponse
     {
-        $this->ensureSuperAdmin($request);
+        $this->ensureCanManage($request);
         $this->resolveSystem($system);
 
         $request->validate([

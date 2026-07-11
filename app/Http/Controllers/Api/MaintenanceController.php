@@ -215,7 +215,7 @@ class MaintenanceController extends Controller
     /** Reemplaza (sync) las frecuencias del mantenimiento. */
     public function syncFrequencies(Request $request, Maintenance $maintenance): JsonResponse
     {
-        abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
+        abort_unless($request->user()->can('maintenances.manage-contract'), 403, 'Sin permiso para gestionar el contrato.');
 
         $data = $request->validate([
             'frequencies'                    => 'present|array',
@@ -264,7 +264,7 @@ class MaintenanceController extends Controller
 
     public function uploadContractFiles(Request $request, Maintenance $maintenance): JsonResponse
     {
-        abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
+        abort_unless($request->user()->can('maintenances.manage-contract'), 403, 'Sin permiso para gestionar el contrato.');
 
         $request->validate([
             'files'   => 'required|array|min:1|max:20',
@@ -295,7 +295,7 @@ class MaintenanceController extends Controller
 
     public function deleteContractFile(Request $request, Maintenance $maintenance, MaintenanceContractFile $file): JsonResponse
     {
-        abort_unless($request->user()->can('maintenances.edit'), 403, 'Sin permiso para editar mantenimientos.');
+        abort_unless($request->user()->can('maintenances.manage-contract'), 403, 'Sin permiso para gestionar el contrato.');
         abort_unless($file->maintenance_id === $maintenance->id, 404);
 
         if (Storage::disk('public')->exists($file->path)) {

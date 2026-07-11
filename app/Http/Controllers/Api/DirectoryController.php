@@ -98,6 +98,7 @@ class DirectoryController extends Controller
     public function store(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->can('directories.create'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'catalog_id' => 'required|exists:catalogs,id',
@@ -137,6 +138,7 @@ class DirectoryController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($directory->site_id === $site->id, 404);
+        abort_unless($request->user()->can('directories.edit'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'name'  => 'nullable|string|max:255',
@@ -155,6 +157,7 @@ class DirectoryController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($directory->site_id === $site->id, 404);
+        abort_unless($request->user()->can('directories.toggle-status'), 403, 'No autorizado para esta acción.');
 
         $directory->update(['is_active' => ! $directory->is_active]);
         $status = $directory->is_active ? 'activado' : 'desactivado';

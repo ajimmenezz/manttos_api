@@ -22,6 +22,7 @@ class ClientEngineerController extends Controller
     public function index(Request $request, Client $client): JsonResponse
     {
         $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-engineers.view'), 403, 'No autorizado para esta acción.');
 
         $engineers = $client->engineers()
             ->with('roles')
@@ -41,6 +42,7 @@ class ClientEngineerController extends Controller
     public function store(Request $request, Client $client): JsonResponse
     {
         $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-engineers.assign'), 403, 'No autorizado para esta acción.');
 
         $request->validate(['user_id' => 'required|exists:users,id']);
 
@@ -71,6 +73,7 @@ class ClientEngineerController extends Controller
     public function destroy(Request $request, Client $client, User $user): JsonResponse
     {
         $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-engineers.remove'), 403, 'No autorizado para esta acción.');
 
         if (! $client->engineers()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'El ingeniero no está asignado a este cliente.'], 404);
@@ -84,6 +87,7 @@ class ClientEngineerController extends Controller
     public function candidates(Request $request, Client $client): JsonResponse
     {
         $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-engineers.view'), 403, 'No autorizado para esta acción.');
 
         $assigned = $client->engineers()->pluck('users.id');
 

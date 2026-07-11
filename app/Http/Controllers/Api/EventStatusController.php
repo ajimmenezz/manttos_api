@@ -14,6 +14,7 @@ class EventStatusController extends Controller
 {
     public function index(): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $statuses = EventStatus::orderBy('sort_order')->orderBy('id')->get();
         $transitions = DB::table('event_status_transitions')
             ->get(['from_status_id', 'to_status_id']);
@@ -29,6 +30,7 @@ class EventStatusController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $data = $request->validate([
             'label'       => 'required|string|max:80',
             'color'       => 'nullable|string|max:9',
@@ -49,6 +51,7 @@ class EventStatusController extends Controller
 
     public function update(Request $request, EventStatus $eventStatus): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $data = $request->validate([
             'label'       => 'required|string|max:80',
             'color'       => 'nullable|string|max:9',
@@ -79,12 +82,14 @@ class EventStatusController extends Controller
 
     public function toggleStatus(EventStatus $eventStatus): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $eventStatus->update(['is_active' => ! $eventStatus->is_active]);
         return response()->json(['message' => 'Estado actualizado.', 'status' => $eventStatus]);
     }
 
     public function reorder(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $request->validate([
             'status_ids'   => 'required|array',
             'status_ids.*' => 'integer|exists:event_statuses,id',
@@ -100,6 +105,7 @@ class EventStatusController extends Controller
     /** Reemplaza el conjunto completo de transiciones GENERALES. */
     public function setTransitions(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $request->validate([
             'transitions'                  => 'present|array',
             'transitions.*.from_status_id' => 'required|integer|exists:event_statuses,id',

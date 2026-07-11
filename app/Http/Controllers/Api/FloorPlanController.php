@@ -37,6 +37,7 @@ class FloorPlanController extends Controller
     public function index(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->can('floor-plans.view'), 403, 'No autorizado para esta acción.');
 
         $plans = $site->floorPlans()
             ->withCount('placements')
@@ -51,6 +52,7 @@ class FloorPlanController extends Controller
     public function store(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->can('floor-plans.manage'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'name'         => 'required|string|max:255',
@@ -80,6 +82,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.view'), 403, 'No autorizado para esta acción.');
 
         $placements = $floorPlan->placements()
             ->with('device:id,directory_id,name,device_type,status,custom_fields')
@@ -126,6 +129,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.place'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'directory_id' => 'required|integer',
@@ -162,6 +166,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.manage'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'name'         => 'sometimes|required|string|max:255',
@@ -183,6 +188,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.manage'), 403, 'No autorizado para esta acción.');
 
         $floorPlan->update(['is_active' => ! $floorPlan->is_active]);
         $status = $floorPlan->is_active ? 'activado' : 'desactivado';
@@ -197,6 +203,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.manage'), 403, 'No autorizado para esta acción.');
 
         // cascade elimina los placements; la imagen se queda en disco (compartible / por limpieza aparte)
         $floorPlan->delete();
@@ -213,6 +220,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.place'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'placements'             => 'required|array|min:1',
@@ -254,6 +262,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.place'), 403, 'No autorizado para esta acción.');
 
         $floorPlan->placements()->where('device_id', $device->id)->delete();
 
@@ -269,6 +278,7 @@ class FloorPlanController extends Controller
     {
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($floorPlan->site_id === $site->id, 404);
+        abort_unless($request->user()->can('floor-plans.place'), 403, 'No autorizado para esta acción.');
 
         $q = $floorPlan->placements();
         if ($request->filled('directory_id')) {
@@ -288,6 +298,7 @@ class FloorPlanController extends Controller
     public function placedDevices(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->can('floor-plans.view'), 403, 'No autorizado para esta acción.');
 
         $rows = DevicePlacement::query()
             ->join('floor_plans', 'device_placements.floor_plan_id', '=', 'floor_plans.id')

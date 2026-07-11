@@ -28,6 +28,8 @@ class ActivityTypeController extends Controller
     /** Sistemas activos con conteo de campos y flag de asociación */
     public function systemsWithFields(int $activityTypeId): JsonResponse
     {
+        abort_unless(auth()->user()->can('catalogs.view'), 403, 'No autorizado para esta acción.');
+
         $this->resolveActivityType($activityTypeId);
 
         $linkedIds = DB::table('activity_type_systems')
@@ -54,6 +56,8 @@ class ActivityTypeController extends Controller
     /** Asociar este tipo de actividad a un sistema */
     public function linkSystem(int $activityTypeId, int $systemId): JsonResponse
     {
+        abort_unless(auth()->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         $this->resolveActivityType($activityTypeId);
         $this->resolveSystem($systemId);
 
@@ -68,6 +72,8 @@ class ActivityTypeController extends Controller
     /** Desasociar este tipo de actividad de un sistema */
     public function unlinkSystem(int $activityTypeId, int $systemId): JsonResponse
     {
+        abort_unless(auth()->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         $this->resolveActivityType($activityTypeId);
         $this->resolveSystem($systemId);
 
@@ -96,6 +102,8 @@ class ActivityTypeController extends Controller
 
     public function storeField(Request $request, int $activityTypeId, int $systemId): JsonResponse
     {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         $this->resolveActivityType($activityTypeId);
         $this->resolveSystem($systemId);
 
@@ -150,6 +158,8 @@ class ActivityTypeController extends Controller
 
     public function updateField(Request $request, int $activityTypeId, int $systemId, ActivityTypeField $field): JsonResponse
     {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         abort_unless(
             $field->activity_type_id === $activityTypeId && $field->system_id === $systemId,
             404
@@ -188,6 +198,8 @@ class ActivityTypeController extends Controller
 
     public function toggleField(int $activityTypeId, int $systemId, ActivityTypeField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         abort_unless(
             $field->activity_type_id === $activityTypeId && $field->system_id === $systemId,
             404
@@ -200,6 +212,8 @@ class ActivityTypeController extends Controller
 
     public function toggleBitacora(int $activityTypeId, int $systemId, ActivityTypeField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         abort_unless(
             $field->activity_type_id === $activityTypeId && $field->system_id === $systemId,
             404
@@ -213,6 +227,8 @@ class ActivityTypeController extends Controller
 
     public function reorderFields(Request $request, int $activityTypeId, int $systemId): JsonResponse
     {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         $this->resolveActivityType($activityTypeId);
         $this->resolveSystem($systemId);
 
@@ -235,6 +251,8 @@ class ActivityTypeController extends Controller
 
     public function destroyField(int $activityTypeId, int $systemId, ActivityTypeField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+
         abort_unless(
             $field->activity_type_id === $activityTypeId && $field->system_id === $systemId,
             404

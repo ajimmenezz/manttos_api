@@ -61,6 +61,8 @@ class ClientController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('clients.create'), 403, 'No autorizado para esta acción.');
+
         $data = $request->validate([
             'name'       => 'required|string|max:255',
             'short_name' => 'nullable|string|max:50',
@@ -88,6 +90,7 @@ class ClientController extends Controller
     public function update(Request $request, Client $client): JsonResponse
     {
         $this->authorizeClientAccess($request, $client);
+        abort_unless($request->user()->can('clients.edit'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'name'       => 'required|string|max:255',
@@ -112,7 +115,7 @@ class ClientController extends Controller
     // quedan ocultos automáticamente (los listados filtran por whereHas del cliente).
     public function destroy(Request $request, Client $client): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar clientes.');
+        abort_unless($request->user()->can('clients.archive'), 403, 'No autorizado para esta acción.');
 
         $client->delete();
 
@@ -121,7 +124,7 @@ class ClientController extends Controller
 
     public function restore(Request $request, Client $client): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar clientes.');
+        abort_unless($request->user()->can('clients.archive'), 403, 'No autorizado para esta acción.');
 
         $client->restore();
 
@@ -131,6 +134,7 @@ class ClientController extends Controller
     public function toggleStatus(Request $request, Client $client): JsonResponse
     {
         $this->authorizeClientAccess($request, $client);
+        abort_unless($request->user()->can('clients.toggle-status'), 403, 'No autorizado para esta acción.');
 
         $client->update(['is_active' => ! $client->is_active]);
         $status = $client->is_active ? 'activado' : 'desactivado';

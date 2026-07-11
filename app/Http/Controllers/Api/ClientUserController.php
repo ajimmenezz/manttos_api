@@ -10,8 +10,20 @@ use Illuminate\Http\Request;
 
 class ClientUserController extends Controller
 {
-    public function index(Client $client): JsonResponse
+    /** superadmin/admin siempre; admin-cliente sólo sus propios clientes. */
+    private function authorizeClient(Request $request, Client $client): void
     {
+        $user = $request->user();
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+        if ($user->hasRole('admin-cliente') && $client->admins()->where('users.id', $user->id)->exists()) return;
+        abort(403, 'No tienes acceso a este cliente.');
+    }
+
+    public function index(Request $request, Client $client): JsonResponse
+    {
+        $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-admins.view'), 403, 'No autorizado para esta acción.');
+
         $admins = $client->admins()
             ->with('roles')
             ->get()
@@ -29,6 +41,9 @@ class ClientUserController extends Controller
 
     public function store(Request $request, Client $client): JsonResponse
     {
+        $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-admins.assign'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'user_id' => 'required|exists:users,id',
         ]);
@@ -57,8 +72,11 @@ class ClientUserController extends Controller
         ], 201);
     }
 
-    public function destroy(Client $client, User $user): JsonResponse
+    public function destroy(Request $request, Client $client, User $user): JsonResponse
     {
+        $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-admins.remove'), 403, 'No autorizado para esta acción.');
+
         if (! $client->admins()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'El usuario no está asignado a este cliente.'], 404);
         }
@@ -70,6 +88,9 @@ class ClientUserController extends Controller
 
     public function candidates(Request $request, Client $client): JsonResponse
     {
+        $this->authorizeClient($request, $client);
+        abort_unless($request->user()->can('client-admins.assign'), 403, 'No autorizado para esta acción.');
+
         $assigned = $client->admins()->pluck('users.id');
 
         $users = User::where('is_active', true)

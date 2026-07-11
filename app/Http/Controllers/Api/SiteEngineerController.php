@@ -25,6 +25,7 @@ class SiteEngineerController extends Controller
     {
         abort_unless($site->client_id === $client->id, 404);
         $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-engineers.view'), 403, 'No autorizado para esta acción.');
 
         $engineers = $site->engineers()
             ->with('roles')
@@ -45,6 +46,7 @@ class SiteEngineerController extends Controller
     {
         abort_unless($site->client_id === $client->id, 404);
         $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-engineers.assign'), 403, 'No autorizado para esta acción.');
 
         $request->validate(['user_id' => 'required|exists:users,id']);
 
@@ -76,6 +78,7 @@ class SiteEngineerController extends Controller
     {
         abort_unless($site->client_id === $client->id, 404);
         $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-engineers.remove'), 403, 'No autorizado para esta acción.');
 
         if (! $site->engineers()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'El ingeniero no está asignado a este sitio.'], 404);
@@ -90,6 +93,7 @@ class SiteEngineerController extends Controller
     {
         abort_unless($site->client_id === $client->id, 404);
         $this->authorizeSite($request, $site);
+        abort_unless($request->user()->can('site-engineers.view'), 403, 'No autorizado para esta acción.');
 
         $assigned = $site->engineers()->pluck('users.id');
 

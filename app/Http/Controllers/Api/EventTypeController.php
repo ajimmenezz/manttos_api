@@ -24,6 +24,7 @@ class EventTypeController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $query = EventType::query()->withCount('linkedSystems as systems_count');
         if ($request->boolean('only_active')) {
             $query->where('is_active', true);
@@ -34,11 +35,13 @@ class EventTypeController extends Controller
 
     public function show(EventType $eventType): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         return response()->json($eventType);
     }
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $data = $this->validateType($request);
         $data['created_by'] = $request->user()->id;
         $data['sort_order'] = (EventType::max('sort_order') ?? -1) + 1;
@@ -48,12 +51,14 @@ class EventTypeController extends Controller
 
     public function update(Request $request, EventType $eventType): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $eventType->update($this->validateType($request));
         return response()->json(['message' => 'Tipo de evento actualizado.', 'event_type' => $eventType]);
     }
 
     public function toggleStatus(EventType $eventType): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $eventType->update(['is_active' => ! $eventType->is_active]);
         return response()->json(['message' => 'Estado actualizado.', 'event_type' => $eventType]);
     }
@@ -72,6 +77,7 @@ class EventTypeController extends Controller
 
     public function systemsWithFields(EventType $eventType): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $linkedIds = DB::table('event_type_systems')
             ->where('event_type_id', $eventType->id)
             ->pluck('system_id')
@@ -98,6 +104,7 @@ class EventTypeController extends Controller
 
     public function linkSystem(EventType $eventType, int $systemId): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $this->resolveSystem($systemId);
         DB::table('event_type_systems')->updateOrInsert(
             ['event_type_id' => $eventType->id, 'system_id' => $systemId],
@@ -108,6 +115,7 @@ class EventTypeController extends Controller
 
     public function unlinkSystem(EventType $eventType, int $systemId): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         DB::table('event_type_systems')
             ->where('event_type_id', $eventType->id)
             ->where('system_id', $systemId)
@@ -119,6 +127,7 @@ class EventTypeController extends Controller
 
     public function fields(EventType $eventType, int $systemId): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $this->resolveSystem($systemId);
         $fields = EventTypeField::where('event_type_id', $eventType->id)
             ->where('system_id', $systemId)
@@ -129,6 +138,7 @@ class EventTypeController extends Controller
 
     public function storeField(Request $request, EventType $eventType, int $systemId): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $this->resolveSystem($systemId);
         $data = $this->validateField($request);
 
@@ -156,6 +166,7 @@ class EventTypeController extends Controller
 
     public function updateField(Request $request, EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
         $data = $this->validateField($request, false);
         $field->update($data);
@@ -164,6 +175,7 @@ class EventTypeController extends Controller
 
     public function toggleField(EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
         $field->update(['is_active' => ! $field->is_active]);
         return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
@@ -172,6 +184,7 @@ class EventTypeController extends Controller
     /** Marca/desmarca el campo para el Reporte de eventos (KPI + filtro). */
     public function toggleReport(EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
         // Solo tipos explotables pueden encenderse (apagar siempre se permite).
         abort_if(
@@ -185,6 +198,7 @@ class EventTypeController extends Controller
 
     public function reorderFields(Request $request, EventType $eventType, int $systemId): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $this->resolveSystem($systemId);
         $request->validate([
             'field_ids'   => 'required|array',
@@ -203,6 +217,7 @@ class EventTypeController extends Controller
 
     public function destroyField(EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
         $field->delete();
         return response()->json(['message' => 'Campo eliminado.']);
@@ -244,6 +259,7 @@ class EventTypeController extends Controller
 
     public function transitions(EventType $eventType): JsonResponse
     {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $rows = EventTypeTransition::where('event_type_id', $eventType->id)
             ->get(['from_status_id', 'to_status_id']);
         return response()->json([
@@ -254,6 +270,7 @@ class EventTypeController extends Controller
 
     public function setTransitions(Request $request, EventType $eventType): JsonResponse
     {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
         $request->validate([
             'transitions'                 => 'present|array',
             'transitions.*.from_status_id' => 'required|integer|exists:event_statuses,id',

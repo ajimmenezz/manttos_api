@@ -14,6 +14,8 @@ class CatalogController extends Controller
     /** Lista paginada con búsqueda, filtro de estado y ordenamiento por columna */
     public function index(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('catalogs.view'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'type'     => 'required|string|in:' . implode(',', self::VALID_TYPES),
             'search'   => 'nullable|string|max:100',
@@ -50,11 +52,15 @@ class CatalogController extends Controller
 
     public function show(Catalog $catalog): JsonResponse
     {
+        abort_unless(auth()->user()->can('catalogs.view'), 403, 'No autorizado para esta acción.');
+
         return response()->json($catalog);
     }
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('catalogs.create'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'type'         => 'required|string|in:' . implode(',', self::VALID_TYPES),
             'label'        => 'required|string|max:100',
@@ -77,6 +83,8 @@ class CatalogController extends Controller
 
     public function update(Request $request, Catalog $catalog): JsonResponse
     {
+        abort_unless($request->user()->can('catalogs.edit'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'label'        => 'required|string|max:100',
             'nomenclatura' => 'nullable|string|max:20',
@@ -102,6 +110,8 @@ class CatalogController extends Controller
 
     public function toggleStatus(Catalog $catalog): JsonResponse
     {
+        abort_unless(auth()->user()->can('catalogs.toggle-status'), 403, 'No autorizado para esta acción.');
+
         // Una categoría de estado de evento no se puede desactivar si tiene estados asociados.
         if ($catalog->is_active
             && $catalog->type === Catalog::TYPE_EVENT_STATUS_CATEGORY
@@ -121,6 +131,8 @@ class CatalogController extends Controller
     /** No eliminamos — solo desactivamos */
     public function destroy(Catalog $catalog): JsonResponse
     {
+        abort_unless(auth()->user()->can('catalogs.toggle-status'), 403, 'No autorizado para esta acción.');
+
         $catalog->update(['is_active' => false]);
 
         return response()->json(['message' => "'{$catalog->label}' desactivado."]);

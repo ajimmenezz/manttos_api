@@ -119,6 +119,17 @@ class SiteController extends Controller
 
     public function store(Request $request, Client $client): JsonResponse
     {
+        // Guard de alcance (hueco previo): el usuario debe poder administrar el cliente padre.
+        // Mismo criterio que ClientController::authorizeClientAccess.
+        $user = $request->user();
+        if (! $user->hasAnyRole(['superadmin', 'admin'])
+            && ! ($user->hasRole('admin-cliente') && $client->admins()->where('users.id', $user->id)->exists())
+            && ! ($user->hasRole('admin-sitio') && $user->sitesAsAdmin()->where('client_id', $client->id)->exists())
+        ) {
+            abort(403, 'No tienes acceso a este cliente.');
+        }
+        abort_unless($user->can('sites.create'), 403, 'No autorizado para esta acción.');
+
         $data = $request->validate([
             'name'    => 'required|string|max:255',
             'code'    => 'nullable|string|max:50',
@@ -150,6 +161,7 @@ class SiteController extends Controller
     public function update(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->can('sites.edit'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'name'    => 'required|string|max:255',
@@ -171,7 +183,7 @@ class SiteController extends Controller
     // mantenimientos/eventos quedan ocultos (los listados filtran por whereHas del sitio).
     public function destroy(Request $request, Client $client, Site $site): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar sitios.');
+        abort_unless($request->user()->can('sites.archive'), 403, 'No autorizado para esta acción.');
         abort_unless($site->client_id === $client->id, 404);
         $site->delete();
 
@@ -180,7 +192,7 @@ class SiteController extends Controller
 
     public function restore(Request $request, Client $client, Site $site): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar sitios.');
+        abort_unless($request->user()->can('sites.archive'), 403, 'No autorizado para esta acción.');
         abort_unless($site->client_id === $client->id, 404);
         $site->restore();
 
@@ -190,6 +202,7 @@ class SiteController extends Controller
     public function toggleStatus(Request $request, Client $client, Site $site): JsonResponse
     {
         $this->authorizeSiteAccess($request, $client, $site);
+        abort_unless($request->user()->can('sites.toggle-status'), 403, 'No autorizado para esta acción.');
         $site->update(['is_active' => ! $site->is_active]);
         $status = $site->is_active ? 'activado' : 'desactivado';
 

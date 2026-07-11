@@ -89,6 +89,7 @@ class DeviceController extends Controller
     public function store(Request $request, Client $client, Site $site, Directory $directory): JsonResponse
     {
         $this->authorizeDirectoryAccess($request, $client, $site, $directory);
+        abort_unless($request->user()->can('devices.create'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'custom_fields' => 'nullable|array',
@@ -128,6 +129,7 @@ class DeviceController extends Controller
     {
         $this->authorizeDirectoryAccess($request, $client, $site, $directory);
         abort_unless($device->directory_id === $directory->id, 404);
+        abort_unless($request->user()->can('devices.edit'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
             'custom_fields' => 'nullable|array',
@@ -154,6 +156,7 @@ class DeviceController extends Controller
     {
         $this->authorizeDirectoryAccess($request, $client, $site, $directory);
         abort_unless($device->directory_id === $directory->id, 404);
+        abort_unless($request->user()->can('devices.toggle-status'), 403, 'No autorizado para esta acción.');
 
         $device->update(['is_active' => ! $device->is_active]);
         $status = $device->is_active ? 'activado' : 'desactivado';

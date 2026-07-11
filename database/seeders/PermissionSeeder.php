@@ -4,128 +4,145 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 
 class PermissionSeeder extends Seeder
 {
+    /**
+     * Catálogo canónico de permisos (esquema granular por acción).
+     *
+     * Principio: el ALCANCE (qué datos ve un usuario) se resuelve por rol/asignación
+     * en los helpers scopeByUser/authorizeXAccess; la CAPACIDAD (qué acción ejecuta)
+     * se resuelve con estos permisos vía $user->can('recurso.accion'), verificado
+     * ENCIMA del alcance en cada endpoint que muta datos.
+     *
+     * Corte limpio: al sembrar se PODAN los permisos que ya no están en esta lista
+     * (p. ej. los viejos *.delete y events.manage). Correr db:seed --class=PermissionSeeder
+     * seguido de permission:cache-reset tras un deploy.
+     */
+    public const PERMISSIONS = [
+        // ── Usuarios ────────────────────────────────────────────────
+        'users.view',
+        'users.create',
+        'users.edit',
+        'users.toggle-status',
+        'users.archive',              // archivar / restaurar (grantable; antes superadmin-only)
+        'users.send-temp-password',
+        'users.assign-permissions',   // otorgar permisos directos a un usuario (sensible)
+
+        // ── Roles y permisos ────────────────────────────────────────
+        'roles.view',
+        'roles.create',
+        'roles.edit',                 // renombrar / describir
+        'roles.assign-permissions',   // editor de permisos del rol (/roles/[id])
+        'roles.archive',
+        'permissions.view',
+
+        // ── Perfil (self-service) ───────────────────────────────────
+        'profile.view',
+        'profile.edit',
+
+        // ── Clientes ────────────────────────────────────────────────
+        'clients.view',
+        'clients.create',
+        'clients.edit',
+        'clients.toggle-status',
+        'clients.archive',
+
+        // ── Sitios ──────────────────────────────────────────────────
+        'sites.view',
+        'sites.create',
+        'sites.edit',
+        'sites.toggle-status',
+        'sites.archive',
+
+        // ── Asignaciones (pivotes) ──────────────────────────────────
+        'client-admins.view',
+        'client-admins.assign',
+        'client-admins.remove',
+        'site-admins.view',
+        'site-admins.assign',
+        'site-admins.remove',
+        'client-engineers.view',
+        'client-engineers.assign',
+        'client-engineers.remove',
+        'site-engineers.view',
+        'site-engineers.assign',
+        'site-engineers.remove',
+
+        // ── Directorios ─────────────────────────────────────────────
+        'directories.view',
+        'directories.create',
+        'directories.edit',
+        'directories.toggle-status',
+
+        // ── Dispositivos ────────────────────────────────────────────
+        'devices.view',
+        'devices.create',
+        'devices.edit',
+        'devices.toggle-status',
+        'devices.import',
+        'devices.export',
+
+        // ── Planos del sitio ────────────────────────────────────────
+        'floor-plans.view',
+        'floor-plans.manage',         // subir / renombrar / eliminar el plano (imagen)
+        'floor-plans.place',          // sembrar/quitar dispositivos + filtro fijo del plano
+
+        // ── Catálogos y configuración de sistemas ───────────────────
+        'catalogs.view',
+        'catalogs.create',
+        'catalogs.edit',
+        'catalogs.toggle-status',
+        'catalogs.merge-device-types', // fusión destructiva de tipos de dispositivo
+        'system-config.view',
+        'system-config.manage',        // plantillas de campos, DID, frecuencias, tipos por sistema
+        'activity-types.configure',    // constructor de formularios de tipos de actividad
+
+        // ── Eventos — configuración ─────────────────────────────────
+        'event-config.manage',         // tipos de evento + estados + flujo (reemplaza events.manage)
+        'event-sla.manage',            // matriz SLA, niveles, overrides (separado de la config)
+
+        // ── Eventos — operación ─────────────────────────────────────
+        'events.view',
+        'events.create',
+        'events.fill-form',            // capturar formulario / clasificación / dispositivo
+        'events.change-status',
+        'events.comment',              // conversación / @menciones
+        'events.assign',               // fase 3 (aún sin cablear)
+
+        // ── Mantenimientos ──────────────────────────────────────────
+        'maintenances.view',
+        'maintenances.create',
+        'maintenances.edit',
+        'maintenances.manage-contract', // frecuencias y archivos de contrato (separado de edit)
+        'maintenances.assign-engineers',
+        'maintenances.record-activity', // registrar / editar / eliminar actividad
+        'maintenances.schedule-devices',// programar dispositivos (separado de record-activity)
+        'maintenances.action-plan',     // planeación de capacidad + agenda
+
+        // ── Actividades ─────────────────────────────────────────────
+        'activities.view-registration-date',
+
+        // ── Sistema ─────────────────────────────────────────────────
+        'config.manage',                // ajustes, SMTP, tema, calendario laboral (superadmin)
+
+        // ── Documentación ───────────────────────────────────────────
+        'manuals.view',                 // guías completas web/móvil
+    ];
+
     public function run(): void
     {
-        $permissions = [
-            // Usuarios
-            'users.view',
-            'users.create',
-            'users.edit',
-            'users.delete',
-            'users.toggle-status',
-            'users.send-temp-password',
-            'users.assign-permissions',
-
-            // Roles
-            'roles.view',
-            'roles.create',
-            'roles.edit',
-            'roles.delete',
-            'roles.assign-permissions',
-
-            // Permisos
-            'permissions.view',
-
-            // Perfil
-            'profile.view',
-            'profile.edit',
-
-            // Clientes
-            'clients.view',
-            'clients.create',
-            'clients.edit',
-            'clients.delete',
-            'clients.toggle-status',
-
-            // Sitios
-            'sites.view',
-            'sites.create',
-            'sites.edit',
-            'sites.delete',
-            'sites.toggle-status',
-
-            // Catálogos
-            'catalogs.view',
-            'catalogs.create',
-            'catalogs.edit',
-            'catalogs.delete',
-
-            // Administradores de cliente
-            'client-admins.view',
-            'client-admins.assign',
-            'client-admins.remove',
-
-            // Administradores de sitio
-            'site-admins.view',
-            'site-admins.assign',
-            'site-admins.remove',
-
-            // Ingenieros que atienden un cliente (→ todos sus sitios)
-            'client-engineers.view',
-            'client-engineers.assign',
-            'client-engineers.remove',
-
-            // Ingenieros que atienden un sitio específico
-            'site-engineers.view',
-            'site-engineers.assign',
-            'site-engineers.remove',
-
-            // Configuración de sistemas (tipos de dispositivo + plantillas de campos)
-            'system-config.view',
-            'system-config.manage',
-
-            // Directorios de dispositivos
-            'directories.view',
-            'directories.create',
-            'directories.edit',
-            'directories.toggle-status',
-
-            // Dispositivos
-            'devices.view',
-            'devices.create',
-            'devices.edit',
-            'devices.toggle-status',
-
-            // Planos (floor plans) — imagen del sitio + sembrado de dispositivos
-            'floor-plans.view',
-            'floor-plans.manage',
-
-            // Mantenimientos
-            'maintenances.view',
-            'maintenances.create',
-            'maintenances.edit',
-            'maintenances.assign-engineers',
-            'maintenances.record-activity',
-            // Plan de acción (planeación de capacidad): sección restringida. La reciben
-            // solo superadmin (bypass) y admin interno (Permission::all()); NO admin-cliente,
-            // admin-sitio, ingeniero ni técnico. Otorgable a un rol/usuario "planeador".
-            'maintenances.action-plan',
-
-            // Actividades
-            'activities.view-registration-date',
-
-            // Eventos (gestión de incidentes / solicitudes)
-            'events.view',
-            'events.create',
-            'events.fill-form',     // capturar el formulario dinámico del evento
-            'events.change-status',
-            'events.assign',        // fase 3
-            'events.manage',        // catálogos: tipos de evento + estados/flujos
-
-            // Configuración del sistema
-            'config.manage',
-
-            // Manuales de uso (guías completas web/móvil consultables dentro del sistema).
-            // 'admin' lo recibe automáticamente (RoleSeeder asigna todo salvo config.manage);
-            // superadmin lo bypasea. El resto de roles NO lo trae por defecto.
-            'manuals.view',
-        ];
-
-        foreach ($permissions as $permission) {
+        foreach (self::PERMISSIONS as $permission) {
             Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']);
         }
+
+        // Corte limpio: retirar permisos obsoletos que ya no están en el catálogo
+        // (viejos *.delete, events.manage, etc.). Detacha en cascada de roles/usuarios.
+        Permission::where('guard_name', 'web')
+            ->whereNotIn('name', self::PERMISSIONS)
+            ->delete();
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 }

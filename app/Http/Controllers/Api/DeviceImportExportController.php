@@ -48,7 +48,7 @@ class DeviceImportExportController extends Controller
     public function export(Request $request, Client $client, Site $site, Directory $directory): StreamedResponse
     {
         $this->authorizeDirectoryAccess($request, $client, $site, $directory);
-        abort_unless($request->user()->can('devices.view'), 403, 'Sin permiso para exportar dispositivos.');
+        abort_unless($request->user()->can('devices.export'), 403, 'Sin permiso para exportar dispositivos.');
 
         $fields  = $this->loadActiveFields($directory, $client->id);
         $devices = $directory->devices()->orderBy('created_at')->get();
@@ -137,7 +137,7 @@ class DeviceImportExportController extends Controller
     public function validateImport(Request $request, Client $client, Site $site, Directory $directory): JsonResponse
     {
         $this->authorizeDirectoryAccess($request, $client, $site, $directory);
-        abort_unless($request->user()->can('devices.create'), 403, 'Sin permiso para importar dispositivos.');
+        abort_unless($request->user()->can('devices.import'), 403, 'Sin permiso para importar dispositivos.');
 
         $request->validate([
             'file' => 'required|file|mimes:xlsx,xls|max:10240',
@@ -250,7 +250,7 @@ class DeviceImportExportController extends Controller
     public function import(Request $request, Client $client, Site $site, Directory $directory): JsonResponse
     {
         $this->authorizeDirectoryAccess($request, $client, $site, $directory);
-        abort_unless($request->user()->can('devices.create'), 403, 'Sin permiso para importar dispositivos.');
+        abort_unless($request->user()->can('devices.import'), 403, 'Sin permiso para importar dispositivos.');
 
         $request->validate([
             'import_token'                          => 'required|string',

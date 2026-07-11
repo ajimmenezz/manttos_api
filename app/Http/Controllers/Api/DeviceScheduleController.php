@@ -10,8 +10,10 @@ use Illuminate\Http\Request;
 
 class DeviceScheduleController extends Controller
 {
-    public function index(Maintenance $maintenance): JsonResponse
+    public function index(Request $request, Maintenance $maintenance): JsonResponse
     {
+        abort_unless($request->user()->can('maintenances.view'), 403, 'Sin permiso para ver la programación.');
+
         $schedules = DeviceSchedule::where('maintenance_id', $maintenance->id)
             ->get(['id', 'device_id', 'scheduled_date']);
 
@@ -20,7 +22,7 @@ class DeviceScheduleController extends Controller
 
     public function store(Request $request, Maintenance $maintenance): JsonResponse
     {
-        abort_unless($request->user()->can('maintenances.record-activity'), 403, 'Sin permiso para programar dispositivos.');
+        abort_unless($request->user()->can('maintenances.schedule-devices'), 403, 'Sin permiso para programar dispositivos.');
 
         $data = $request->validate([
             'device_ids'     => 'required|array|min:1',
@@ -52,7 +54,7 @@ class DeviceScheduleController extends Controller
 
     public function update(Request $request, Maintenance $maintenance, DeviceSchedule $schedule): JsonResponse
     {
-        abort_unless($request->user()->can('maintenances.record-activity'), 403, 'Sin permiso para reprogramar.');
+        abort_unless($request->user()->can('maintenances.schedule-devices'), 403, 'Sin permiso para reprogramar.');
         abort_unless($schedule->maintenance_id === $maintenance->id, 404);
 
         $data = $request->validate([
@@ -66,7 +68,7 @@ class DeviceScheduleController extends Controller
 
     public function destroy(Request $request, Maintenance $maintenance, DeviceSchedule $schedule): JsonResponse
     {
-        abort_unless($request->user()->can('maintenances.record-activity'), 403, 'Sin permiso para desprogramar.');
+        abort_unless($request->user()->can('maintenances.schedule-devices'), 403, 'Sin permiso para desprogramar.');
         abort_unless($schedule->maintenance_id === $maintenance->id, 404);
 
         $schedule->delete();

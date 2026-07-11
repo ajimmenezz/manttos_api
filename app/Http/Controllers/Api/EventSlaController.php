@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Administración del catálogo de SLA de eventos (solo events.manage):
+ * Administración del catálogo de SLA de eventos (solo event-sla.manage):
  * niveles de atención, matriz Impacto×Urgencia, objetivos por prioridad,
  * calendario de servicio y el mapeo estado→nivel. Config global + override por cliente.
  */
@@ -23,7 +23,7 @@ class EventSlaController extends Controller
 {
     private function authorize(Request $request): void
     {
-        abort_unless($request->user()->can('events.manage'), 403);
+        abort_unless($request->user()->can('event-sla.manage'), 403);
     }
 
     /** Contexto completo para la pantalla de configuración. */

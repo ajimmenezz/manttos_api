@@ -30,6 +30,7 @@ class EventCommentController extends Controller
     // ─── Listado (plano; el front arma el árbol por parent_id) ─────
     public function index(Request $request, Event $event): JsonResponse
     {
+        abort_unless($request->user()->can('events.view'), 403, 'No autorizado para esta acción.');
         $this->authorizeAccess($request, $event);
 
         // withTrashed: un comentario borrado se conserva ("comentario eliminado")
@@ -47,6 +48,7 @@ class EventCommentController extends Controller
     // ─── Crear comentario o respuesta ─────────────────────────────
     public function store(Request $request, Event $event): JsonResponse
     {
+        abort_unless($request->user()->can('events.comment'), 403, 'No autorizado para esta acción.');
         $this->authorizeAccess($request, $event);
 
         $data = $request->validate([
@@ -92,6 +94,7 @@ class EventCommentController extends Controller
     // ─── Editar (solo el autor) ───────────────────────────────────
     public function update(Request $request, Event $event, EventComment $comment): JsonResponse
     {
+        abort_unless($request->user()->can('events.comment'), 403, 'No autorizado para esta acción.');
         $this->authorizeAccess($request, $event);
         abort_unless($comment->event_id === $event->id, 404);
         abort_unless($comment->user_id === $request->user()->id, 403, 'Solo el autor puede editar su comentario.');
@@ -115,6 +118,7 @@ class EventCommentController extends Controller
     // ─── Eliminar (autor o admin) — borrado lógico ────────────────
     public function destroy(Request $request, Event $event, EventComment $comment): JsonResponse
     {
+        abort_unless($request->user()->can('events.comment'), 403, 'No autorizado para esta acción.');
         $this->authorizeAccess($request, $event);
         abort_unless($comment->event_id === $event->id, 404);
 
@@ -129,6 +133,7 @@ class EventCommentController extends Controller
     // ─── Usuarios arrobables (con acceso al evento) ───────────────
     public function mentionable(Request $request, Event $event): JsonResponse
     {
+        abort_unless($request->user()->can('events.comment'), 403, 'No autorizado para esta acción.');
         $this->authorizeAccess($request, $event);
         return response()->json($this->mentionableUsers($event));
     }

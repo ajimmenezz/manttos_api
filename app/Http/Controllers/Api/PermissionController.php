@@ -10,6 +10,8 @@ class PermissionController extends Controller
 {
     public function index(): JsonResponse
     {
+        abort_unless(auth()->user()->can('permissions.view'), 403, 'No autorizado para esta acción.');
+
         $permissions = Permission::orderBy('name')->get()->groupBy(function ($permission) {
             return explode('.', $permission->name)[0];
         });
@@ -19,6 +21,8 @@ class PermissionController extends Controller
 
     public function flat(): JsonResponse
     {
+        abort_unless(auth()->user()->can('permissions.view'), 403, 'No autorizado para esta acción.');
+
         return response()->json(Permission::orderBy('name')->get());
     }
 }

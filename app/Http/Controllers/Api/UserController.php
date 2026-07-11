@@ -17,6 +17,8 @@ class UserController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('users.view'), 403, 'No autorizado para esta acción.');
+
         $users = User::with('roles')
             // ?archived=1 → solo los archivados (papelera); por defecto solo activos.
             ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
@@ -34,6 +36,8 @@ class UserController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('users.create'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'name'  => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
@@ -78,11 +82,15 @@ class UserController extends Controller
 
     public function show(User $user): JsonResponse
     {
+        abort_unless(auth()->user()->can('users.view'), 403, 'No autorizado para esta acción.');
+
         return response()->json($this->serializeUser($user->load('roles', 'permissions')));
     }
 
     public function update(Request $request, User $user): JsonResponse
     {
+        abort_unless($request->user()->can('users.edit'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'name'    => 'required|string|max:255',
             'email'   => "required|email|unique:users,email,{$user->id}",
@@ -104,8 +112,8 @@ class UserController extends Controller
 
     public function destroy(Request $request, User $user): JsonResponse
     {
-        // Archivar = baja lógica (soft delete). Solo el superadministrador.
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar usuarios.');
+        // Archivar = baja lógica (soft delete). Requiere permiso de archivado.
+        abort_unless($request->user()->can('users.archive'), 403, 'No autorizado para esta acción.');
 
         // Única restricción: el superadministrador inicial nunca se archiva.
         abort_if($user->id === 1, 403, 'No se puede archivar al superadministrador inicial.');
@@ -122,7 +130,7 @@ class UserController extends Controller
 
     public function restore(Request $request, User $user): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar usuarios.');
+        abort_unless($request->user()->can('users.archive'), 403, 'No autorizado para esta acción.');
 
         $user->restore();
 
@@ -131,6 +139,8 @@ class UserController extends Controller
 
     public function toggleStatus(User $user): JsonResponse
     {
+        abort_unless(auth()->user()->can('users.toggle-status'), 403, 'No autorizado para esta acción.');
+
         if ($user->hasRole('superadmin')) {
             return response()->json(['message' => 'No se puede desactivar al superadministrador.'], 403);
         }
@@ -144,6 +154,8 @@ class UserController extends Controller
 
     public function sendTempPassword(User $user): JsonResponse
     {
+        abort_unless(auth()->user()->can('users.send-temp-password'), 403, 'No autorizado para esta acción.');
+
         $tempPassword = Str::password(12);
 
         $user->update([
@@ -174,6 +186,8 @@ class UserController extends Controller
 
     public function assignPermissions(Request $request, User $user): JsonResponse
     {
+        abort_unless($request->user()->can('users.assign-permissions'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             'permissions'   => 'required|array',
             'permissions.*' => 'exists:permissions,name',

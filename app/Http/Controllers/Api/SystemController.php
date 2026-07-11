@@ -30,6 +30,8 @@ class SystemController extends Controller
 
     public function deviceTypes(int $id): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         return response()->json(
@@ -40,6 +42,8 @@ class SystemController extends Controller
     /** Asigna (sync) un conjunto de tipos de dispositivo al sistema */
     public function syncDeviceTypes(Request $request, int $id): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         $request->validate([
@@ -123,6 +127,8 @@ class SystemController extends Controller
     /** Sistemas asignados a un tipo de dispositivo */
     public function deviceTypeSystems(int $catalogId): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');
+
         $deviceType = Catalog::findOrFail($catalogId);
         abort_if($deviceType->type !== Catalog::TYPE_DEVICE_TYPE, 404, 'No es un tipo de dispositivo.');
 
@@ -134,6 +140,8 @@ class SystemController extends Controller
     /** Fusiona uno o más tipos de dispositivo en el tipo canónico */
     public function mergeDeviceTypes(Request $request, int $canonicalId): JsonResponse
     {
+        abort_unless($request->user()->can('catalogs.merge-device-types'), 403, 'No autorizado para esta acción.');
+
         $canonical = Catalog::findOrFail($canonicalId);
         abort_if($canonical->type !== Catalog::TYPE_DEVICE_TYPE, 404, 'No es un tipo de dispositivo.');
 
@@ -226,6 +234,8 @@ class SystemController extends Controller
     /** Sincroniza los sistemas asignados a un tipo de dispositivo */
     public function syncDeviceTypeSystems(Request $request, int $catalogId): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $deviceType = Catalog::findOrFail($catalogId);
         abort_if($deviceType->type !== Catalog::TYPE_DEVICE_TYPE, 404, 'No es un tipo de dispositivo.');
 
@@ -279,6 +289,8 @@ class SystemController extends Controller
     /** Tipos de actividad asociados al sistema (activos). */
     public function activityTypes(int $id): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         return response()->json(
@@ -292,6 +304,8 @@ class SystemController extends Controller
     /** Frecuencias de mantenimiento definidas para el sistema. */
     public function frequencies(int $id): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         return response()->json(
@@ -303,6 +317,8 @@ class SystemController extends Controller
     /** Reemplaza (sync) las frecuencias del sistema con la matriz enviada. */
     public function syncFrequencies(Request $request, int $id): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         $data = $request->validate([
@@ -342,6 +358,8 @@ class SystemController extends Controller
     /** Tiempos estándar por tarea (minutos) definidos para el sistema. */
     public function taskDurations(int $id): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         return response()->json(
@@ -353,6 +371,8 @@ class SystemController extends Controller
     /** Reemplaza (sync) los tiempos por tarea del sistema con la matriz enviada. */
     public function syncTaskDurations(Request $request, int $id): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         $data = $request->validate([
@@ -408,6 +428,8 @@ class SystemController extends Controller
 
     public function storeField(Request $request, int $id): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         $data = $request->validate([
@@ -449,6 +471,8 @@ class SystemController extends Controller
 
     public function updateField(Request $request, int $id, SystemField $field): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
 
@@ -523,6 +547,8 @@ class SystemController extends Controller
 
     public function toggleField(int $id, SystemField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
 
@@ -534,6 +560,8 @@ class SystemController extends Controller
 
     public function toggleDashboard(int $id, SystemField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
 
@@ -545,6 +573,8 @@ class SystemController extends Controller
 
     public function toggleBitacora(int $id, SystemField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
 
@@ -557,6 +587,8 @@ class SystemController extends Controller
     /** Marca/desmarca el campo del directorio como KPI del Reporte de eventos. */
     public function toggleEventReport(int $id, SystemField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
 
@@ -568,6 +600,8 @@ class SystemController extends Controller
 
     public function fieldImpact(int $id, SystemField $field): JsonResponse
     {
+        abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
 
@@ -581,7 +615,7 @@ class SystemController extends Controller
 
     public function destroyField(Request $request, int $id, SystemField $field): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadmin puede eliminar campos de plantilla.');
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
 
         $system = $this->resolveSystem($id);
         abort_unless($field->catalog_id === $system->id, 404);
@@ -624,6 +658,8 @@ class SystemController extends Controller
 
     public function reorderFields(Request $request, int $id): JsonResponse
     {
+        abort_unless($request->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
         $system = $this->resolveSystem($id);
 
         $request->validate([

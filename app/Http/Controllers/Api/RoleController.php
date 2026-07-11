@@ -19,6 +19,8 @@ class RoleController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('roles.view'), 403, 'No autorizado para esta acción.');
+
         $roles = Role::with('permissions')->withCount('users')
             // ?archived=1 → solo los archivados (papelera); por defecto solo activos.
             ->when($request->boolean('archived'), fn ($q) => $q->onlyTrashed())
@@ -34,6 +36,8 @@ class RoleController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        abort_unless($request->user()->can('roles.create'), 403, 'No autorizado para esta acción.');
+
         $request->validate([
             // Ignora roles archivados al validar unicidad (aunque el índice de BD aún reserva el nombre).
             'name'          => ['required', 'string', 'max:100', Rule::unique('roles', 'name')->whereNull('deleted_at')],
@@ -55,12 +59,16 @@ class RoleController extends Controller
 
     public function show(Role $role): JsonResponse
     {
+        abort_unless(auth()->user()->can('roles.view'), 403, 'No autorizado para esta acción.');
+
         $role->is_system = in_array($role->name, self::SYSTEM_ROLES);
         return response()->json($role->load('permissions'));
     }
 
     public function update(Request $request, Role $role): JsonResponse
     {
+        abort_unless($request->user()->can('roles.edit'), 403, 'No autorizado para esta acción.');
+
         if (in_array($role->name, self::SYSTEM_ROLES)) {
             return response()->json(['message' => 'Los roles del sistema no se pueden modificar.'], 403);
         }
@@ -86,7 +94,7 @@ class RoleController extends Controller
     // Archivar = baja lógica (soft delete). Reversible desde "Ver archivados".
     public function destroy(Request $request, Role $role): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede archivar roles.');
+        abort_unless($request->user()->can('roles.archive'), 403, 'No autorizado para esta acción.');
 
         if (in_array($role->name, self::PROTECTED_FROM_DELETION)) {
             return response()->json(['message' => 'Este rol es parte del sistema y no se puede archivar.'], 403);
@@ -107,7 +115,7 @@ class RoleController extends Controller
 
     public function restore(Request $request, Role $role): JsonResponse
     {
-        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo el superadministrador puede restaurar roles.');
+        abort_unless($request->user()->can('roles.archive'), 403, 'No autorizado para esta acción.');
 
         $role->restore();
 
@@ -116,6 +124,8 @@ class RoleController extends Controller
 
     public function syncPermissions(Request $request, Role $role): JsonResponse
     {
+        abort_unless($request->user()->can('roles.assign-permissions'), 403, 'No autorizado para esta acción.');
+
         if (in_array($role->name, self::SYSTEM_ROLES)) {
             return response()->json(['message' => 'Los permisos de los roles del sistema se gestionan internamente.'], 403);
         }
