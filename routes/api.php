@@ -1,10 +1,24 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityTypeController;
+use App\Http\Controllers\Api\AiChatController;
+use App\Http\Controllers\Api\AiLogController;
+use App\Http\Controllers\Api\AiSettingController;
 use App\Http\Controllers\Api\AppSettingController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ChannelController;
+use App\Http\Controllers\Api\KnowledgeController;
+use App\Http\Controllers\Api\PortalKnowledgeController;
+use App\Http\Controllers\Api\CaptureSimulatorController;
+use App\Http\Controllers\Api\CaptureInboxController;
+use App\Http\Controllers\Api\SolicitanteController;
+use App\Http\Controllers\Api\CaptureContactController;
+use App\Http\Controllers\Api\AppChatController;
+use App\Http\Controllers\Api\TelegramWebhookController;
+use App\Http\Controllers\Api\WhatsAppWebhookController;
 use App\Http\Controllers\Api\DeveloperTokenController;
 use App\Http\Middleware\RequireWriteScope;
+use App\Http\Controllers\Api\McpController;
 use App\Http\Controllers\Api\MaintenanceActionPlanController;
 use App\Http\Controllers\Api\MaintenanceActivityController;
 use App\Http\Controllers\Api\MaintenanceDashboardController;
@@ -47,6 +61,13 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
+// Webhook público de Telegram (captación de eventos). Valida el secreto por header.
+Route::post('/telegram/webhook/{channel}', [TelegramWebhookController::class, 'handle']);
+
+// Webhook público de WhatsApp Cloud API (captación de eventos).
+Route::get('/whatsapp/webhook',  [WhatsAppWebhookController::class, 'verify']);
+Route::post('/whatsapp/webhook', [WhatsAppWebhookController::class, 'handle']);
+
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -57,6 +78,78 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/settings/tenants',    [AppSettingController::class, 'tenants']);
     Route::put('/settings',            [AppSettingController::class, 'update']);
     Route::post('/settings/test-mail', [AppSettingController::class, 'testMail']);
+
+    // Asistente de IA — configuración (proveedor/modelo/API key + estimación de costo)
+    Route::get('/ai/config', [AiSettingController::class, 'show']);
+    Route::put('/ai/config', [AiSettingController::class, 'update']);
+
+    // Asistente de IA — chat (disponible para cualquier usuario autenticado)
+    Route::get('/ai/status',    [AiChatController::class, 'status']);
+    Route::post('/ai/chat',         [AiChatController::class, 'send']);
+    Route::post('/ai/chat/confirm', [AiChatController::class, 'confirm']);
+    Route::post('/ai/feedback',     [AiChatController::class, 'feedback']);
+    Route::get('/ai/reports/{report}', [AiChatController::class, 'report']);
+
+    // Asistente de IA — registro/observabilidad (solo super-admin)
+    Route::get('/ai/interactions',              [AiLogController::class, 'index']);
+    Route::get('/ai/interactions/stats',        [AiLogController::class, 'stats']);
+    Route::get('/ai/interactions/{interaction}', [AiLogController::class, 'show']);
+
+    // Servidor MCP estándar (JSON-RPC 2.0). El mismo ToolRegistry, para clientes
+    // MCP externos. Se autentica con el token del usuario (permisos heredados).
+    Route::post('/mcp', [McpController::class, 'handle']);
+
+    // Captación de eventos — líneas de mensajería (Telegram/WhatsApp) + agente.
+    Route::get('/channels',                          [ChannelController::class, 'index']);
+    Route::post('/channels',                         [ChannelController::class, 'store']);
+    Route::put('/channels/{channel}',                [ChannelController::class, 'update']);
+    Route::delete('/channels/{channel}',             [ChannelController::class, 'destroy']);
+    Route::post('/channels/{channel}/verify-token',  [ChannelController::class, 'verifyToken']);
+    Route::get('/channels/{channel}/conversations',   [ChannelController::class, 'conversations']);
+    Route::get('/channels/{channel}/conversations/{conversation}/messages', [ChannelController::class, 'conversationMessages']);
+
+    // Bandeja de captación (hilos persistentes de todas las líneas) + relevo humano.
+    Route::get('/captacion/conversations',                          [CaptureInboxController::class, 'index']);
+    Route::get('/captacion/conversations/{conversation}',           [CaptureInboxController::class, 'show']);
+    Route::post('/captacion/conversations/{conversation}/messages', [CaptureInboxController::class, 'send']);
+    Route::patch('/captacion/conversations/{conversation}/handling',[CaptureInboxController::class, 'setHandling']);
+
+    // Chat de asistente dentro de la app (usuario autenticado → mismo agente de captación).
+    Route::get('/app-chat',       [AppChatController::class, 'index']);
+    Route::post('/app-chat',      [AppChatController::class, 'send']);
+    Route::get('/app-chat/poll',  [AppChatController::class, 'poll']);
+
+    // Base de conocimiento de soporte (RAG por sistema/cliente) para el soporte de 1er nivel.
+    Route::get('/knowledge',                       [KnowledgeController::class, 'index']);
+    Route::get('/knowledge/options',               [KnowledgeController::class, 'options']);
+    // Lector navegable de la base de conocimiento (equipo): artículos + búsqueda semántica.
+    Route::get('/knowledge/articles',              [KnowledgeController::class, 'articles']);
+    Route::get('/knowledge/topics',                [KnowledgeController::class, 'topics']);
+    Route::get('/knowledge/articles/search',       [KnowledgeController::class, 'articleSearch']);
+    Route::get('/knowledge/articles/{document}',   [KnowledgeController::class, 'article']);
+    Route::post('/knowledge',                      [KnowledgeController::class, 'store']);
+    Route::put('/knowledge/{document}',            [KnowledgeController::class, 'update']);
+    Route::post('/knowledge/{document}/reingest',  [KnowledgeController::class, 'reingest']);
+    Route::get('/knowledge/{document}/download',   [KnowledgeController::class, 'download']);
+    Route::delete('/knowledge/{document}',         [KnowledgeController::class, 'destroy']);
+
+    // Base de conocimiento en el PORTAL (autoservicio del solicitante).
+    Route::get('/portal/knowledge',                [PortalKnowledgeController::class, 'index']);
+    Route::get('/portal/knowledge/topics',         [PortalKnowledgeController::class, 'topics']);
+    Route::get('/portal/knowledge/search',         [PortalKnowledgeController::class, 'search']);
+    Route::get('/portal/knowledge/{document}',     [PortalKnowledgeController::class, 'show']);
+
+    // Simulador del agente de captación (probar la IA sin canal real).
+    Route::get('/captacion/simulator',             [CaptureSimulatorController::class, 'index']);
+    Route::post('/captacion/simulator/start',      [CaptureSimulatorController::class, 'start']);
+    Route::post('/captacion/simulator/message',    [CaptureSimulatorController::class, 'message']);
+    Route::post('/captacion/simulator/reset',      [CaptureSimulatorController::class, 'reset']);
+
+    // Contactos de captación etiquetados a cliente/sitio (bandeja + ficha cliente/sitio).
+    Route::get('/captacion/contacts',            [CaptureContactController::class, 'index']);
+    Route::post('/captacion/contacts',           [CaptureContactController::class, 'store']);
+    Route::patch('/captacion/contacts/{contact}',[CaptureContactController::class, 'update']);
+    Route::delete('/captacion/contacts/{contact}',[CaptureContactController::class, 'destroy']);
 
     // Calendario laboral (plan de acción): días/horas + festivos. Restringido a config.manage.
     Route::get('/work-calendar',                       [WorkCalendarController::class, 'show']);
@@ -92,6 +185,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/users/{user}/toggle-status', [UserController::class, 'toggleStatus']);
     Route::post('/users/{user}/restore', [UserController::class, 'restore'])->withTrashed();
     Route::post('/users/{user}/send-temp-password', [UserController::class, 'sendTempPassword']);
+    Route::post('/users/{user}/access-link',        [UserController::class, 'accessLink']);
+
+    // Solicitantes (usuarios de portal / autoservicio) — gestión con alcance + importación.
+    Route::get('/solicitantes',                       [SolicitanteController::class, 'index']);
+    Route::post('/solicitantes',                      [SolicitanteController::class, 'store']);
+    Route::get('/solicitantes/import/template',       [SolicitanteController::class, 'importTemplate']);
+    Route::post('/solicitantes/import',               [SolicitanteController::class, 'import']);
+    Route::put('/solicitantes/{user}',                [SolicitanteController::class, 'update']);
+    Route::delete('/solicitantes/{user}',             [SolicitanteController::class, 'destroy']);
+    Route::post('/solicitantes/{user}/access-link',   [SolicitanteController::class, 'accessLink']);
     Route::post('/users/{user}/permissions', [UserController::class, 'assignPermissions']);
 
     // Clientes
@@ -277,6 +380,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/{event}',         [EventController::class, 'show']);
     Route::put('/events/{event}',         [EventController::class, 'update']);
     Route::post('/events/{event}/status', [EventController::class, 'changeStatus']);
+    Route::get('/events/{event}/assignable', [EventController::class, 'assignable']); // candidatos a asignación
+    Route::post('/events/{event}/assign',  [EventController::class, 'assign']);       // asignar / reasignar / retirar
 
     // Conversación del evento (hilos anidados + @menciones)
     Route::get('/events/{event}/mentionable-users', [EventCommentController::class, 'mentionable']);

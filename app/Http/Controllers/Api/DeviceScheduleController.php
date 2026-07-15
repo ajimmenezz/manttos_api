@@ -10,9 +10,27 @@ use Illuminate\Http\Request;
 
 class DeviceScheduleController extends Controller
 {
+    /**
+     * Alcance por-usuario del mantenimiento (antes solo se validaba el permiso →
+     * un ingeniero podía programar dispositivos en mantenimientos ajenos).
+     */
+    private function authorizeMaintenanceAccess(Request $request, Maintenance $maintenance): void
+    {
+        $user = $request->user();
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+        if ($user->hasRole('admin-sitio') && $user->sitesAsAdmin()->where('sites.id', $maintenance->site_id)->exists()) return;
+        if ($user->hasRole('admin-cliente')) {
+            $maintenance->loadMissing('site');
+            if ($user->clientsAsAdmin()->where('clients.id', $maintenance->site->client_id)->exists()) return;
+        }
+        if ($user->hasRole('ingeniero') && $maintenance->engineers()->where('users.id', $user->id)->exists()) return;
+        abort(403, 'No tienes acceso a este mantenimiento.');
+    }
+
     public function index(Request $request, Maintenance $maintenance): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.view'), 403, 'Sin permiso para ver la programación.');
+        $this->authorizeMaintenanceAccess($request, $maintenance);
 
         $schedules = DeviceSchedule::where('maintenance_id', $maintenance->id)
             ->get(['id', 'device_id', 'scheduled_date']);
@@ -23,6 +41,7 @@ class DeviceScheduleController extends Controller
     public function store(Request $request, Maintenance $maintenance): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.schedule-devices'), 403, 'Sin permiso para programar dispositivos.');
+        $this->authorizeMaintenanceAccess($request, $maintenance);
 
         $data = $request->validate([
             'device_ids'     => 'required|array|min:1',
@@ -55,6 +74,7 @@ class DeviceScheduleController extends Controller
     public function update(Request $request, Maintenance $maintenance, DeviceSchedule $schedule): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.schedule-devices'), 403, 'Sin permiso para reprogramar.');
+        $this->authorizeMaintenanceAccess($request, $maintenance);
         abort_unless($schedule->maintenance_id === $maintenance->id, 404);
 
         $data = $request->validate([
@@ -69,6 +89,7 @@ class DeviceScheduleController extends Controller
     public function destroy(Request $request, Maintenance $maintenance, DeviceSchedule $schedule): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.schedule-devices'), 403, 'Sin permiso para desprogramar.');
+        $this->authorizeMaintenanceAccess($request, $maintenance);
         abort_unless($schedule->maintenance_id === $maintenance->id, 404);
 
         $schedule->delete();

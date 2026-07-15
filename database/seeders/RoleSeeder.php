@@ -37,7 +37,8 @@ class RoleSeeder extends Seeder
             'devices.view', 'devices.export',
             'floor-plans.view',
             'maintenances.view', 'maintenances.create',
-            'events.view', 'events.create', 'events.comment',
+            'events.view', 'events.create', 'events.comment', 'events.assign',
+            'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
         ]);
 
         // Admin de sitio: gestiona su(s) sitio(s): directorios, dispositivos y planos.
@@ -52,6 +53,16 @@ class RoleSeeder extends Seeder
             'devices.view', 'devices.create', 'devices.edit', 'devices.toggle-status', 'devices.import', 'devices.export',
             'floor-plans.view', 'floor-plans.manage', 'floor-plans.place',
             'maintenances.view', 'maintenances.create',
+            'events.view', 'events.create', 'events.comment', 'events.assign',
+            'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
+        ]);
+
+        // Solicitante: usuario de portal / autoservicio. Solo levanta y da seguimiento
+        // a SUS propios eventos (visibilidad restringida a created_by en ScopesEvents) y
+        // comenta. Su alcance de creación viene de su asignación a cliente/sitio.
+        $solicitante = Role::firstOrCreate(['name' => 'solicitante', 'guard_name' => 'web']);
+        $solicitante->syncPermissions([
+            'profile.view', 'profile.edit',
             'events.view', 'events.create', 'events.comment',
         ]);
 

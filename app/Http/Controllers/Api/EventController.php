@@ -13,7 +13,9 @@ use App\Models\EventStatusHistory;
 use App\Models\EventType;
 use App\Models\EventTypeField;
 use App\Models\EventTypeTransition;
+use App\Models\Notification;
 use App\Models\Site;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -59,6 +61,9 @@ class EventController extends Controller
             ->when($request->filled('event_type_id'), fn ($q) => $q->where('events.event_type_id', $request->event_type_id))
             ->when($request->filled('status_id'),     fn ($q) => $q->where('events.status_id', $request->status_id))
             ->when($request->filled('priority'),      fn ($q) => $q->where('events.priority', $request->priority))
+            // Pool: sólo eventos sin asignar (bandeja "Sin asignar") o por asignado.
+            ->when($request->boolean('unassigned'),   fn ($q) => $q->whereNull('events.assigned_to'))
+            ->when($request->filled('assigned_to'),   fn ($q) => $q->where('events.assigned_to', $request->assigned_to))
             ->when($request->filled('search'),        fn ($q) => $q->where(fn ($s) =>
                 $s->where('events.folio', 'ilike', "%{$request->search}%")
                   ->orWhere('events.description', 'ilike', "%{$request->search}%")))
@@ -166,6 +171,11 @@ class EventController extends Controller
         if ($user->hasRole('ingeniero')) {
             if ($user->sitesAsEngineer()->where('sites.id', $site->id)->exists()) return true;
             return $user->clientsAsEngineer()->where('clients.id', $site->client_id)->exists();
+        }
+        // Solicitante (portal): puede levantar en los sitios de su(s) cliente(s)/sitio(s) asociados.
+        if ($user->hasRole('solicitante')) {
+            return $user->solicitanteClients()->where('clients.id', $site->client_id)->exists()
+                || $user->solicitanteSites()->where('sites.id', $site->id)->exists();
         }
         return false;
     }
@@ -351,6 +361,87 @@ class EventController extends Controller
         return response()->json(['message' => 'Estado actualizado.', 'event' => $event->fresh(['status'])]);
     }
 
+    // ─── Asignación: pool → ingeniero (y reasignar / retirar) ─────
+    /**
+     * Asigna (o reasigna / retira) un evento a un ingeniero. El asignado debe tener
+     * alcance al sitio del evento. Deja constancia en el historial y notifica al asignado.
+     * `assigned_to` nulo devuelve el evento al pool "sin asignar".
+     */
+    public function assign(Request $request, Event $event): JsonResponse
+    {
+        $this->authorizeAccess($request, $event);
+        abort_unless($request->user()->can('events.assign'), 403, 'No puedes asignar eventos.');
+
+        $data = $request->validate([
+            'assigned_to' => 'nullable|integer|exists:users,id',
+        ]);
+
+        $assigneeId = $data['assigned_to'] ?? null;
+        $assignee   = null;
+
+        if ($assigneeId !== null) {
+            // Sólo ingenieros/técnicos con alcance al sitio (clientes o sitios asignados).
+            $assignee = $this->assignableUsers($event)->firstWhere('id', $assigneeId);
+            abort_unless($assignee, 422, 'El usuario seleccionado no puede atender este sitio.');
+        }
+
+        // Sin cambios reales → responder sin ruido ni notificación.
+        if ((int) $event->assigned_to === (int) $assigneeId) {
+            return response()->json(['message' => 'Sin cambios.', 'event' => $event->fresh(['assignee:id,name'])]);
+        }
+
+        DB::transaction(function () use ($event, $assigneeId, $assignee, $request) {
+            $event->update(['assigned_to' => $assigneeId]);
+
+            EventStatusHistory::create([
+                'event_id'       => $event->id,
+                'from_status_id' => $event->status_id,
+                'to_status_id'   => $event->status_id, // la asignación no cambia el estado
+                'user_id'        => $request->user()->id,
+                'note'           => $assignee ? "Asignado a {$assignee->name}" : 'Asignación retirada (regresa al pool)',
+                'created_at'     => now(),
+            ]);
+
+            if ($assignee && $assignee->id !== $request->user()->id) {
+                Notification::createFor($assignee->id, 'event_assigned', [
+                    'event_id'   => $event->id,
+                    'folio'      => $event->folio,
+                    'actor_id'   => $request->user()->id,
+                    'actor_name' => $request->user()->name,
+                ]);
+            }
+        });
+
+        return response()->json([
+            'message' => $assignee ? "Evento asignado a {$assignee->name}." : 'Asignación retirada; el evento vuelve al pool.',
+            'event'   => $event->fresh(['assignee:id,name', 'status:id,key,label,color']),
+        ]);
+    }
+
+    /** Candidatos a asignación (para el selector del front). */
+    public function assignable(Request $request, Event $event): JsonResponse
+    {
+        $this->authorizeAccess($request, $event);
+        abort_unless($request->user()->can('events.assign'), 403, 'No autorizado para esta acción.');
+        return response()->json($this->assignableUsers($event));
+    }
+
+    /**
+     * Usuarios que pueden atender el sitio del evento: ingenieros/técnicos con alcance
+     * al cliente (client_engineers) o al sitio (site_engineers). Es el conjunto válido
+     * para asignar; coincide con la visibilidad de un ingeniero sobre el evento.
+     */
+    private function assignableUsers(Event $event)
+    {
+        $ids = collect()
+            ->merge(DB::table('client_engineers')->where('client_id', $event->client_id)->pluck('user_id'))
+            ->merge(DB::table('site_engineers')->where('site_id', $event->site_id)->pluck('user_id'))
+            ->unique()->values();
+
+        return User::whereIn('id', $ids)->where('is_active', true)
+            ->orderBy('name')->get(['id', 'name', 'email']);
+    }
+
     /** Estados siguientes permitidos: override por tipo si existe, si no el general. */
     private function allowedNext(Event $event): array
     {
@@ -534,8 +625,22 @@ class EventController extends Controller
             $siteQuery->whereIn('id', $user->sitesAsAdmin()->pluck('sites.id'));
         } elseif ($user->hasRole('ingeniero')) {
             $siteQuery->whereIn('id', $this->engineerSiteIds($user));
+        } elseif ($user->hasRole('solicitante')) {
+            // Portal: sitios de su(s) cliente(s)/sitio(s) asociados (pivotes dedicados).
+            $clientIds = $user->solicitanteClients()->pluck('clients.id');
+            $siteIds   = $user->solicitanteSites()->pluck('sites.id');
+            $siteQuery->where(fn ($q) => $q->whereIn('client_id', $clientIds)->orWhereIn('id', $siteIds));
         } else {
-            $siteQuery->whereRaw('1 = 0');
+            // Rol nuevo con events.create: alcance por sus asignaciones de cliente/sitio.
+            $clientIds = $user->clientsAsAdmin()->pluck('clients.id');
+            $siteIds   = $user->sitesAsAdmin()->pluck('sites.id');
+            if ($clientIds->isNotEmpty() || $siteIds->isNotEmpty()) {
+                $siteQuery->where(fn ($q) => $q
+                    ->whereIn('client_id', $clientIds)
+                    ->orWhereIn('id', $siteIds));
+            } else {
+                $siteQuery->whereRaw('1 = 0');
+            }
         }
         $sites = $siteQuery->with('client:id,name,short_name')->orderBy('name')->get(['id', 'name', 'client_id']);
 

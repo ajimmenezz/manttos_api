@@ -23,6 +23,8 @@ class User extends Authenticatable
         'is_active',
         'created_by',
         'last_login_at',
+        'telegram_username',
+        'whatsapp_number',
     ];
 
     protected $hidden = [
@@ -65,6 +67,18 @@ class User extends Authenticatable
     public function sitesAsEngineer()
     {
         return $this->belongsToMany(Site::class, 'site_engineers')->withTimestamps();
+    }
+
+    /** Clientes a los que un solicitante (portal) puede levantar reportes. */
+    public function solicitanteClients()
+    {
+        return $this->belongsToMany(Client::class, 'solicitante_client')->withTimestamps();
+    }
+
+    /** Sitios a los que un solicitante (portal) puede levantar reportes. */
+    public function solicitanteSites()
+    {
+        return $this->belongsToMany(Site::class, 'solicitante_site')->withTimestamps();
     }
 
     /**

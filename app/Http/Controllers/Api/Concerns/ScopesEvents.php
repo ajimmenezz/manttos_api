@@ -38,7 +38,25 @@ trait ScopesEvents
                     ->orWhere('events.assigned_to', $user->id);
             });
         }
-        return $query->whereRaw('1 = 0');
+        if ($user->hasRole('solicitante')) {
+            // Autoservicio: solo ve SUS propios reportes, aunque esté asociado a un cliente/sitio.
+            return $query->where('events.created_by', $user->id);
+        }
+
+        // Rol no reconocido por nombre (p. ej. un rol nuevo "Solicitante" con events.create):
+        // si tiene asignaciones como administrador de cliente/sitio, dale ese alcance; si no,
+        // al menos lo que él mismo levantó. Así un rol nuevo con el permiso funciona sin tocar
+        // este trait cada vez, siempre que se le asignen sus clientes/sitios.
+        $clientIds = $user->clientsAsAdmin()->pluck('clients.id');
+        $siteIds   = $user->sitesAsAdmin()->pluck('sites.id');
+        if ($clientIds->isNotEmpty() || $siteIds->isNotEmpty()) {
+            return $query->where(function ($q) use ($clientIds, $siteIds, $user) {
+                $q->whereIn('events.client_id', $clientIds)
+                    ->orWhereIn('events.site_id', $siteIds)
+                    ->orWhere('events.created_by', $user->id);
+            });
+        }
+        return $query->where('events.created_by', $user->id);
     }
 
     /** Sitios que un ingeniero puede atender: clientes asignados (→ todos sus sitios) ∪ sitios asignados. */

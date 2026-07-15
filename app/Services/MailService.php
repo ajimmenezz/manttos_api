@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AppSetting;
 use Illuminate\Mail\Mailable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
 class MailService
@@ -12,6 +13,25 @@ class MailService
     {
         $host = AppSetting::allAsMap()['smtp_host'] ?? null;
         return !empty($host);
+    }
+
+    /** Tope diario de envíos configurado (0 = sin límite). */
+    public static function dailyLimit(): int
+    {
+        return (int) (AppSetting::allAsMap()['mail_daily_limit'] ?? 0);
+    }
+
+    /** Correos enviados hoy (para el contador y el tope). */
+    public static function sentToday(): int
+    {
+        return DB::table('mail_send_logs')->whereDate('created_at', now()->toDateString())->count();
+    }
+
+    /** ¿Ya se alcanzó el tope diario? */
+    public static function dailyLimitReached(): bool
+    {
+        $limit = self::dailyLimit();
+        return $limit > 0 && self::sentToday() >= $limit;
     }
 
     /** Aplica la configuración SMTP de la BD al mailer en tiempo de ejecución */
@@ -43,10 +63,21 @@ class MailService
             return ['sent' => false, 'preview' => self::renderPreview($mailable, $toEmail)];
         }
 
+        // Tope diario: si se alcanzó, no se envía (evita spam/bloqueos); el flujo que
+        // llama puede ofrecer el enlace de acceso para compartirlo por otro medio.
+        if (self::dailyLimitReached()) {
+            return [
+                'sent'      => false,
+                'throttled' => true,
+                'preview'   => self::renderPreview($mailable, $toEmail),
+            ];
+        }
+
         self::configure();
 
         try {
             Mail::to($toEmail, $toName ?: $toEmail)->send($mailable);
+            self::logSent($mailable, $toEmail);
             return ['sent' => true];
         } catch (\Throwable $e) {
             return [
@@ -54,6 +85,23 @@ class MailService
                 'error'   => $e->getMessage(),
                 'preview' => self::renderPreview($mailable, $toEmail),
             ];
+        }
+    }
+
+    /** Registra un envío exitoso para el contador/tope diario (no debe romper el envío). */
+    private static function logSent(Mailable $mailable, string $toEmail): void
+    {
+        try {
+            $subject = null;
+            try { $subject = $mailable->envelope()->subject; } catch (\Throwable) {}
+            DB::table('mail_send_logs')->insert([
+                'to_email'   => $toEmail,
+                'subject'    => $subject,
+                'mailable'   => class_basename($mailable),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable) {
+            // La bitácora es best-effort.
         }
     }
 

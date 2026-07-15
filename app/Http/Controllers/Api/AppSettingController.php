@@ -81,6 +81,9 @@ class AppSettingController extends Controller
             $map['smtp_password'] = self::SMTP_PASSWORD_PLACEHOLDER;
         }
 
+        // Contador de correos enviados hoy (para el tope diario).
+        $map['mail_sent_today'] = \App\Services\MailService::sentToday();
+
         return response()->json($this->normalizeFlags($this->decodeTheme($map)));
     }
 
@@ -103,6 +106,7 @@ class AppSettingController extends Controller
             'smtp_password'   => 'sometimes|nullable|string|max:500',
             'smtp_from_email' => 'sometimes|nullable|email|max:255',
             'smtp_from_name'  => 'sometimes|nullable|string|max:100',
+            'mail_daily_limit'=> 'sometimes|nullable|integer|min:0|max:100000',
         ]);
 
         // El branding y el tema son por dominio; el SMTP es global (tenant default).
@@ -129,6 +133,7 @@ class AppSettingController extends Controller
         if (!empty($map['smtp_password'])) {
             $map['smtp_password'] = self::SMTP_PASSWORD_PLACEHOLDER;
         }
+        $map['mail_sent_today'] = \App\Services\MailService::sentToday();
 
         return response()->json($this->decodeTheme($map));
     }

@@ -9,6 +9,7 @@ use App\Services\MailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Spatie\Permission\Models\Role;
@@ -43,8 +44,11 @@ class UserController extends Controller
             'email' => 'required|email|unique:users,email',
             'roles' => 'nullable|array',
             'roles.*' => 'exists:roles,name',
+            'telegram_username' => 'nullable|string|max:80',
+            'whatsapp_number'   => 'nullable|string|max:40',
         ]);
 
+        $identity = $this->messagingIdentity($request, null);
         $tempPassword = Str::password(12);
 
         $user = User::create([
@@ -54,6 +58,8 @@ class UserController extends Controller
             'must_change_password' => true,
             'is_active'            => true,
             'created_by'           => $request->user()->id,
+            'telegram_username'    => $identity['telegram_username'],
+            'whatsapp_number'      => $identity['whatsapp_number'],
         ]);
 
         if ($request->roles) {
@@ -96,9 +102,14 @@ class UserController extends Controller
             'email'   => "required|email|unique:users,email,{$user->id}",
             'roles'   => 'nullable|array',
             'roles.*' => 'exists:roles,name',
+            'telegram_username' => 'nullable|string|max:80',
+            'whatsapp_number'   => 'nullable|string|max:40',
         ]);
 
-        $user->update($request->only('name', 'email'));
+        $user->update(array_merge(
+            $request->only('name', 'email'),
+            $this->messagingIdentity($request, $user->id),
+        ));
 
         if ($request->has('roles')) {
             $user->syncRoles($request->roles ?? []);
@@ -201,6 +212,25 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * Genera un enlace de acceso (definir contraseña) para copiar y compartir por el
+     * medio que sea (WhatsApp, etc.), sin depender del envío de correo. Reutiliza el
+     * mecanismo de recuperación de contraseña.
+     */
+    public function accessLink(Request $request, User $user): JsonResponse
+    {
+        abort_unless($request->user()->can('users.send-temp-password'), 403, 'No autorizado para esta acción.');
+
+        $token = PasswordBroker::broker()->createToken($user);
+        $url = rtrim(config('app.frontend_url', config('app.url')), '/')
+            . '/reset-password?token=' . $token . '&email=' . urlencode($user->email);
+
+        return response()->json([
+            'url'     => $url,
+            'message' => 'Enlace de acceso generado.',
+        ]);
+    }
+
     private function serializeUser(User $user): array
     {
         return [
@@ -211,10 +241,33 @@ class UserController extends Controller
             'must_change_password' => $user->must_change_password,
             'last_login_at'        => $user->last_login_at,
             'created_by'           => $user->created_by,
+            'telegram_username'    => $user->telegram_username,
+            'whatsapp_number'      => $user->whatsapp_number,
             'roles'                => $user->roles->pluck('name'),
             'permissions'          => $user->relationLoaded('permissions')
                                         ? $user->permissions->pluck('name')
                                         : [],
         ];
+    }
+
+    /**
+     * Normaliza la identidad de mensajería (Telegram sin @/minúsculas; WhatsApp solo
+     * dígitos) y valida que no la use ya otro usuario.
+     *
+     * @return array{telegram_username:?string, whatsapp_number:?string}
+     */
+    private function messagingIdentity(Request $request, ?int $ignoreId): array
+    {
+        $tg = ltrim(strtolower(trim((string) $request->input('telegram_username'))), '@') ?: null;
+        $wa = preg_replace('/\D+/', '', (string) $request->input('whatsapp_number')) ?: null;
+
+        if ($tg && User::where('telegram_username', $tg)->where('id', '!=', $ignoreId)->exists()) {
+            abort(422, 'Ese usuario de Telegram ya está asignado a otra persona.');
+        }
+        if ($wa && User::where('whatsapp_number', $wa)->where('id', '!=', $ignoreId)->exists()) {
+            abort(422, 'Ese número de WhatsApp ya está asignado a otra persona.');
+        }
+
+        return ['telegram_username' => $tg, 'whatsapp_number' => $wa];
     }
 }

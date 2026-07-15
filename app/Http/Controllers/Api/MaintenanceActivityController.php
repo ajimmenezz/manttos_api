@@ -336,6 +336,7 @@ class MaintenanceActivityController extends Controller
     public function destroy(Request $request, Maintenance $maintenance, MaintenanceActivity $activity): JsonResponse
     {
         abort_unless($activity->maintenance_id === $maintenance->id, 404);
+        $this->authorizeAccess($maintenance);   // faltaba: sin esto se borraban actividades de mantenimientos ajenos
         abort_unless(
             $request->user()->can('maintenances.record-activity') || $request->user()->id === $activity->user_id,
             403,

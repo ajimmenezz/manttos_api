@@ -20,8 +20,15 @@ class SiteController extends Controller
         $query ??= $client->sites();
         $user = $request->user();
 
-        if ($user->hasAnyRole(['superadmin', 'admin', 'admin-cliente'])) {
+        if ($user->hasAnyRole(['superadmin', 'admin'])) {
             return $query;
+        }
+
+        // El admin-cliente solo ve los sitios de SUS clientes (antes devolvía todos → enumeración ajena).
+        if ($user->hasRole('admin-cliente')) {
+            return $user->clientsAsAdmin()->where('clients.id', $client->id)->exists()
+                ? $query
+                : $query->whereRaw('1 = 0');
         }
 
         if ($user->hasRole('admin-sitio')) {
@@ -52,7 +59,10 @@ class SiteController extends Controller
 
         $user = $request->user();
 
-        if ($user->hasAnyRole(['superadmin', 'admin', 'admin-cliente'])) return;
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+
+        // El admin-cliente solo accede a sitios de SUS clientes (antes pasaba sin verificar → fuga).
+        if ($user->hasRole('admin-cliente') && $user->clientsAsAdmin()->where('clients.id', $client->id)->exists()) return;
 
         if ($user->hasRole('admin-sitio') && $site->admins()->where('users.id', $user->id)->exists()) return;
 

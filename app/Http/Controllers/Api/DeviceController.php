@@ -22,7 +22,10 @@ class DeviceController extends Controller
 
         $user = $request->user();
 
-        if ($user->hasAnyRole(['superadmin', 'admin', 'admin-cliente'])) return;
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+
+        // El admin-cliente solo accede a directorios de SUS clientes (antes pasaba sin verificar → fuga).
+        if ($user->hasRole('admin-cliente') && $user->clientsAsAdmin()->where('clients.id', $client->id)->exists()) return;
 
         if ($user->hasRole('admin-sitio') && $site->admins()->where('users.id', $user->id)->exists()) return;
 

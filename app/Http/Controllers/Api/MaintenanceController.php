@@ -24,7 +24,10 @@ class MaintenanceController extends Controller
 
         $user = $request->user();
 
-        if ($user->hasAnyRole(['superadmin', 'admin', 'admin-cliente'])) return;
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+
+        // El admin-cliente solo accede a sitios de SUS clientes (antes pasaba sin verificar → fuga).
+        if ($user->hasRole('admin-cliente') && $user->clientsAsAdmin()->where('clients.id', $client->id)->exists()) return;
 
         if ($user->hasRole('admin-sitio') && $site->admins()->where('users.id', $user->id)->exists()) return;
 
@@ -205,6 +208,7 @@ class MaintenanceController extends Controller
     public function frequencies(Request $request, Maintenance $maintenance): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.view'), 403);
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
 
         return response()->json(
             MaintenanceContractFrequency::where('maintenance_id', $maintenance->id)
@@ -216,6 +220,7 @@ class MaintenanceController extends Controller
     public function syncFrequencies(Request $request, Maintenance $maintenance): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.manage-contract'), 403, 'Sin permiso para gestionar el contrato.');
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
 
         $data = $request->validate([
             'frequencies'                    => 'present|array',
@@ -254,6 +259,7 @@ class MaintenanceController extends Controller
     public function contractFiles(Request $request, Maintenance $maintenance): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.view'), 403);
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
 
         return response()->json(
             MaintenanceContractFile::where('maintenance_id', $maintenance->id)
@@ -265,6 +271,7 @@ class MaintenanceController extends Controller
     public function uploadContractFiles(Request $request, Maintenance $maintenance): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.manage-contract'), 403, 'Sin permiso para gestionar el contrato.');
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
 
         $request->validate([
             'files'   => 'required|array|min:1|max:20',
@@ -296,6 +303,7 @@ class MaintenanceController extends Controller
     public function deleteContractFile(Request $request, Maintenance $maintenance, MaintenanceContractFile $file): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.manage-contract'), 403, 'Sin permiso para gestionar el contrato.');
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
         abort_unless($file->maintenance_id === $maintenance->id, 404);
 
         if (Storage::disk('public')->exists($file->path)) {

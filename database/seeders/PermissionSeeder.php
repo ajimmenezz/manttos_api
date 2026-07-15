@@ -109,7 +109,17 @@ class PermissionSeeder extends Seeder
         'events.fill-form',            // capturar formulario / clasificación / dispositivo
         'events.change-status',
         'events.comment',              // conversación / @menciones
-        'events.assign',               // fase 3 (aún sin cablear)
+        'events.assign',               // asignar/reasignar un evento a un ingeniero (pool)
+
+        // ── Captación de eventos (WhatsApp/Telegram) ────────────────
+        'channels.manage',             // alta y configuración de líneas de mensajería + agente
+        'knowledge.manage',            // base de conocimiento de soporte (RAG por sistema) del agente
+
+        // ── Solicitantes (usuarios de portal / autoservicio) ────────
+        'solicitantes.view',           // ver el directorio de solicitantes (con alcance)
+        'solicitantes.create',         // dar de alta solicitantes (incl. importación masiva)
+        'solicitantes.edit',           // editar datos / identidad de mensajería / reasignar
+        'solicitantes.delete',         // quitar / archivar un solicitante
 
         // ── Mantenimientos ──────────────────────────────────────────
         'maintenances.view',
