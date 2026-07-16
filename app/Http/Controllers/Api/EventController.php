@@ -286,6 +286,32 @@ class EventController extends Controller
         ]);
     }
 
+    /**
+     * (Re)genera el "Resumen de IA" del evento (síntesis de formulario, notas,
+     * estados y comentarios). Se usa al abrir el detalle cuando está desactualizado
+     * o con el botón Actualizar. El agente de captación también lo aprovecha.
+     */
+    public function aiSummary(Request $request, Event $event, \App\Services\Ai\EventSummaryService $svc): JsonResponse
+    {
+        $this->authorizeAccess($request, $event);
+
+        if (! $svc->isOperational()) {
+            return response()->json(['message' => 'La IA no está configurada. Actívala en Ajustes → Asistente IA.'], 422);
+        }
+
+        try {
+            $summary = $svc->summarize($event);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'No se pudo generar el resumen: ' . $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'ai_summary'       => $summary,
+            'ai_summary_at'    => $event->ai_summary_at,
+            'ai_summary_stale' => false,
+        ]);
+    }
+
     // ─── Capturar / editar formulario (ingeniero) ─────────────────
     public function update(Request $request, Event $event): JsonResponse
     {

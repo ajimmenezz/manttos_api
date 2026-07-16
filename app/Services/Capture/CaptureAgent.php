@@ -381,6 +381,9 @@ class CaptureAgent
             return array_filter([
                 'folio'         => $e->folio,
                 'estado'        => optional($e->status)->label,
+                // Síntesis confiable de TODO el evento (formulario, notas, estados),
+                // generada por la IA en la plataforma: priorízala al responder estatus.
+                'resumen_ia'    => $e->ai_summary ? \Illuminate\Support\Str::limit(trim((string) $e->ai_summary), 700) : null,
                 'reporte'       => $e->description ? \Illuminate\Support\Str::limit((string) $e->description, 160) : null,
                 'sitio'         => optional($e->site)->name,
                 'sistema'       => optional($e->system)->label,
@@ -563,7 +566,8 @@ class CaptureAgent
         // Eventos ya levantados por este contacto (para responder por su estatus).
         $eventsBlock = ! empty($events)
             ? "EVENTOS YA REPORTADOS POR ESTA PERSONA (datos para responder su estatus). Cada uno puede traer: "
-                . "folio, estado, reporte (lo que reportó), sitio, sistema, prioridad, dispositivo, quién lo atiende, "
+                . "folio, estado, resumen_ia (síntesis CONFIABLE de todo el evento: si existe, básate en ella primero), "
+                . "reporte (lo que reportó), sitio, sistema, prioridad, dispositivo, quién lo atiende, "
                 . "fecha, ultimo_avance (última nota de seguimiento), datos capturados y enlace (para ver el detalle):\n"
                 . json_encode(array_values($events), JSON_UNESCAPED_UNICODE) . "\n"
             : "ESTA PERSONA NO TIENE EVENTOS PREVIOS EN ESTE HILO. Si pregunta por el estatus de un folio que no aparece aquí, no inventes: dile que lo verificará uno de nuestros agentes de solución.\n";

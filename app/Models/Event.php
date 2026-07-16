@@ -29,6 +29,9 @@ class Event extends Model
         'images',
         'ai_diagnosis',
         'ai_diagnosis_at',
+        'ai_summary',
+        'ai_summary_at',
+        'ai_summary_stale',
         'created_by',
         'assigned_to',
         'occurred_at',
@@ -41,10 +44,26 @@ class Event extends Model
             'images'                 => 'array',
             'ai_diagnosis'           => 'array',
             'ai_diagnosis_at'        => 'datetime',
+            'ai_summary_at'          => 'datetime',
+            'ai_summary_stale'       => 'boolean',
             'occurred_at'            => 'datetime',
             'scheduled_attention_at' => 'datetime',
             'priority_auto'          => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Cualquier cambio de fondo del evento marca el Resumen de IA como
+        // DESACTUALIZADO (se regenera al usarse, no en cada guardado). Los propios
+        // campos del resumen no cuentan (EventSummaryService guarda con saveQuietly).
+        static::updating(function (Event $event) {
+            $meta = ['ai_summary', 'ai_summary_at', 'ai_summary_stale'];
+            $dirty = array_diff(array_keys($event->getDirty()), $meta);
+            if ($dirty !== []) {
+                $event->ai_summary_stale = true;
+            }
+        });
     }
 
     public function client()    { return $this->belongsTo(Client::class); }

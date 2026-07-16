@@ -11,6 +11,15 @@ class EventComment extends Model
 
     protected $fillable = ['event_id', 'user_id', 'parent_id', 'body'];
 
+    protected static function booted(): void
+    {
+        // Documentar el evento (comentar) desactualiza su Resumen de IA.
+        $stale = fn (self $c) => \Illuminate\Support\Facades\DB::table('events')
+            ->where('id', $c->event_id)->update(['ai_summary_stale' => true]);
+        static::created($stale);
+        static::deleted($stale);
+    }
+
     public function event()
     {
         return $this->belongsTo(Event::class);

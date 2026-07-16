@@ -18,6 +18,15 @@ class EventStatusHistory extends Model
         return ['created_at' => 'datetime'];
     }
 
+    protected static function booted(): void
+    {
+        // Un movimiento de estado (o nota de avance) desactualiza el Resumen de IA.
+        static::created(function (self $h) {
+            \Illuminate\Support\Facades\DB::table('events')
+                ->where('id', $h->event_id)->update(['ai_summary_stale' => true]);
+        });
+    }
+
     public function event()      { return $this->belongsTo(Event::class); }
     public function fromStatus() { return $this->belongsTo(EventStatus::class, 'from_status_id'); }
     public function toStatus()   { return $this->belongsTo(EventStatus::class, 'to_status_id'); }

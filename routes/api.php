@@ -391,7 +391,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/events/{event}/status', [EventController::class, 'changeStatus']);
     Route::get('/events/{event}/assignable', [EventController::class, 'assignable']); // candidatos a asignación
     Route::post('/events/{event}/assign',  [EventController::class, 'assign']);       // asignar / reasignar / retirar
-    Route::post('/events/{event}/diagnose', [EventController::class, 'diagnose']);    // diagnóstico de apoyo por IA (fotos + RAG)
+    Route::post('/events/{event}/diagnose', [EventController::class, 'diagnose']);
+    Route::post('/events/{event}/ai-summary', [EventController::class, 'aiSummary']);    // diagnóstico de apoyo por IA (fotos + RAG)
 
     // Conversación del evento (hilos anidados + @menciones)
     Route::get('/events/{event}/mentionable-users', [EventCommentController::class, 'mentionable']);
