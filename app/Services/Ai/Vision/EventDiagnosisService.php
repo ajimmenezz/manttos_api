@@ -43,7 +43,7 @@ class EventDiagnosisService
             throw new \RuntimeException('No hay imágenes legibles en el evento para analizar.');
         }
 
-        $event->loadMissing(['system:id,label', 'device:id,name,brand,model', 'eventType:id,name']);
+        $event->loadMissing(['system:id,label', 'device:id,name,brand,model', 'eventType:id,label']);
         $started = microtime(true);
 
         // (1) Visión: extraer hallazgos de las fotos.

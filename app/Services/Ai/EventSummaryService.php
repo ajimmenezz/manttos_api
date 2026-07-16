@@ -68,7 +68,7 @@ class EventSummaryService
     private function prompt(Event $event): string
     {
         $event->loadMissing([
-            'status:id,label', 'eventType:id,name', 'site:id,name', 'client:id,name,short_name',
+            'status:id,label', 'eventType:id,label', 'site:id,name', 'client:id,name,short_name',
             'system:id,label', 'device:id,name,brand,model', 'creator:id,name', 'assignee:id,name',
             'history.toStatus:id,label', 'history.fromStatus:id,label', 'history.user:id,name',
         ]);
@@ -80,7 +80,7 @@ class EventSummaryService
 
         $general = array_filter([
             'folio'              => $event->folio,
-            'tipo'               => optional($event->eventType)->name,
+            'tipo'               => optional($event->eventType)->label,
             'estado_actual'      => optional($event->status)->label,
             'prioridad'          => $event->priority,
             'impacto'            => $event->impact,
