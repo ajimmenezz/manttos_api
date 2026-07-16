@@ -92,6 +92,9 @@ class EventController extends Controller
             'scheduled_attention_at' => 'nullable|date',
             'description'   => 'required|string|max:5000',
             'occurred_at'   => 'nullable|date',
+            // Fotos del levantamiento (URLs de MediaController), para evidencia + diagnóstico IA.
+            'images'        => 'nullable|array|max:20',
+            'images.*'      => 'string|max:1000',
             // Captura rica opcional (la app móvil del ingeniero documenta el formulario al alta).
             'field_values'  => 'nullable|array',
             // Llave de idempotencia generada por el cliente (evita duplicados si se reintenta el alta).
@@ -143,6 +146,7 @@ class EventController extends Controller
                 'scheduled_attention_at' => $scheduledAt,
                 'description'   => $data['description'],
                 'field_values'  => $hasForm ? $data['field_values'] : null,
+                'images'        => ! empty($data['images']) ? array_values($data['images']) : null,
                 'created_by'    => $user->id,
                 'occurred_at'   => $this->resolveOccurredAt($data['occurred_at'] ?? null, now()),
             ]);
@@ -253,6 +257,35 @@ class EventController extends Controller
         ]);
     }
 
+    /**
+     * Diagnóstico INICIAL DE APOYO: la IA analiza las fotos del evento + la descripción,
+     * cruza con la base de conocimiento del sistema y devuelve una orientación (no un
+     * veredicto). Idempotente-reejecutable: recalcula y sobreescribe el guardado.
+     */
+    public function diagnose(Request $request, Event $event, \App\Services\Ai\Vision\EventDiagnosisService $svc): JsonResponse
+    {
+        $this->authorizeAccess($request, $event);
+
+        if (empty($event->images)) {
+            return response()->json(['message' => 'Este evento no tiene fotos para analizar.'], 422);
+        }
+        if (! $svc->canDiagnose($event)) {
+            return response()->json(['message' => 'La IA de visión no está configurada. Configura un modelo con visión (OpenAI GPT-4o o Claude) en Ajustes → Asistente IA.'], 422);
+        }
+
+        try {
+            $diagnosis = $svc->diagnose($event);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'No se pudo generar el diagnóstico: ' . $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message'         => 'Diagnóstico de apoyo generado.',
+            'ai_diagnosis'    => $diagnosis,
+            'ai_diagnosis_at' => $event->ai_diagnosis_at,
+        ]);
+    }
+
     // ─── Capturar / editar formulario (ingeniero) ─────────────────
     public function update(Request $request, Event $event): JsonResponse
     {
@@ -268,6 +301,8 @@ class EventController extends Controller
             'device_id'    => 'nullable|exists:devices,id',
             'occurred_at'  => 'nullable|date',
             'field_values' => 'nullable|array',
+            'images'       => 'nullable|array|max:20',
+            'images.*'     => 'string|max:1000',
         ]);
 
         // Prioridad: si cambian impacto/urgencia y la prioridad era automática (o el usuario
@@ -299,6 +334,7 @@ class EventController extends Controller
                 'priority_auto' => $newAuto,
                 'scheduled_attention_at' => $scheduledAt,
                 'field_values'  => $data['field_values'] ?? $event->field_values,
+                'images'        => array_key_exists('images', $data) ? array_values((array) $data['images']) : $event->images,
             // device_id por presencia: permite ligar Y desligar (null) explícitamente.
             ] + (array_key_exists('device_id', $data) ? ['device_id' => $data['device_id']] : []));
 

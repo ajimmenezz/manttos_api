@@ -26,6 +26,9 @@ class Event extends Model
         'scheduled_attention_at',
         'description',
         'field_values',
+        'images',
+        'ai_diagnosis',
+        'ai_diagnosis_at',
         'created_by',
         'assigned_to',
         'occurred_at',
@@ -35,6 +38,9 @@ class Event extends Model
     {
         return [
             'field_values'           => 'array',
+            'images'                 => 'array',
+            'ai_diagnosis'           => 'array',
+            'ai_diagnosis_at'        => 'datetime',
             'occurred_at'            => 'datetime',
             'scheduled_attention_at' => 'datetime',
             'priority_auto'          => 'boolean',
