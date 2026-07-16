@@ -64,7 +64,15 @@ class CaptureAgent
         $supportMode = $channel->supportMode();
         $knowledge = $this->knowledgeFor($conversation, $channel, $contact, $sites, $systems, $supportMode);
 
-        $system = $this->systemPrompt($channel, $contact, $sites, $systems, $events, $deviceCandidates, (string) $conversation->context_summary, $knowledge, $supportMode, $photoObs);
+        // Sistema en curso (del hilo o único posible) para reglas/knowledge por sistema.
+        $activeSystemId = $conversation->state['system_id'] ?? null;
+        if (! $activeSystemId && collect($systems)->count() === 1) {
+            $activeSystemId = (int) collect($systems)->first()['id'];
+        }
+        // Reglas de comportamiento configuradas por el admin (global + línea + sistema).
+        $behaviorRules = $this->behaviorRules($channel, $activeSystemId ? (int) $activeSystemId : null);
+
+        $system = $this->systemPrompt($channel, $contact, $sites, $systems, $events, $deviceCandidates, (string) $conversation->context_summary, $knowledge, $supportMode, $photoObs, $behaviorRules);
         try {
             [$content, $usage] = $this->complete($messages, $system, $resolved);
         } catch (\Throwable $e) {
@@ -428,6 +436,36 @@ class CaptureAgent
         }
     }
 
+    /**
+     * Reglas de comportamiento configuradas por el admin, aplicables a esta conversación:
+     * globales + de la línea + del sistema en curso. Ordenadas por prioridad (sort_order).
+     *
+     * @return array<int,array{instruction:string,example_bad:?string,example_good:?string}>
+     */
+    private function behaviorRules(Channel $channel, ?int $systemId): array
+    {
+        return \App\Models\CaptureAgentRule::query()
+            ->where('is_active', true)
+            ->where(function ($q) use ($channel, $systemId) {
+                $q->where('scope', \App\Models\CaptureAgentRule::SCOPE_GLOBAL)
+                  ->orWhere(function ($w) use ($channel) {
+                      $w->where('scope', \App\Models\CaptureAgentRule::SCOPE_CHANNEL)->where('channel_id', $channel->id);
+                  });
+                if ($systemId) {
+                    $q->orWhere(function ($w) use ($systemId) {
+                        $w->where('scope', \App\Models\CaptureAgentRule::SCOPE_SYSTEM)->where('catalog_id', $systemId);
+                    });
+                }
+            })
+            ->orderBy('sort_order')->orderBy('id')
+            ->get(['instruction', 'example_bad', 'example_good'])
+            ->map(fn ($r) => [
+                'instruction'  => (string) $r->instruction,
+                'example_bad'  => $r->example_bad,
+                'example_good' => $r->example_good,
+            ])->all();
+    }
+
     /** Último mensaje entrante (síntoma) para usar como consulta de recuperación. */
     private function lastInbound(CaptureConversation $conversation): string
     {
@@ -467,7 +505,7 @@ class CaptureAgent
             ])->filter(fn ($m) => $m['content'] !== '')->values()->all();
     }
 
-    private function systemPrompt(Channel $channel, ?\App\Models\CaptureContact $contact, $sites, $systems, array $events, array $deviceCandidates = [], string $memory = '', array $knowledge = [], string $supportMode = 'off', ?string $photoObservation = null): string
+    private function systemPrompt(Channel $channel, ?\App\Models\CaptureContact $contact, $sites, $systems, array $events, array $deviceCandidates = [], string $memory = '', array $knowledge = [], string $supportMode = 'off', ?string $photoObservation = null, array $behaviorRules = []): string
     {
         $agent = $channel->agent_name ?: 'Asistente';
         $extra = trim((string) $channel->instructions);
@@ -549,6 +587,27 @@ class CaptureAgent
         if ($internal !== []) {
             $knowledgeBlock .= "CRITERIOS DE RESPUESTA (cómo comunicar con el cliente; guíate por esto, NO lo cites textual):\n"
                 . $fmt($internal) . "\n\n";
+        }
+
+        // Reglas de comportamiento configuradas por el admin (global/línea/sistema): tienen
+        // PRIORIDAD sobre el comportamiento por defecto. Cada una puede traer ejemplo bien/mal.
+        $rulesBlock = '';
+        if (! empty($behaviorRules)) {
+            $lines = [];
+            foreach ($behaviorRules as $r) {
+                $instruction = trim((string) ($r['instruction'] ?? ''));
+                if ($instruction === '') continue;
+                $line = '- ' . $instruction;
+                $good = trim((string) ($r['example_good'] ?? ''));
+                $bad  = trim((string) ($r['example_bad'] ?? ''));
+                if ($good !== '') $line .= "\n    ✓ Ejemplo correcto: \"{$good}\"";
+                if ($bad !== '')  $line .= "\n    ✗ Evita responder así: \"{$bad}\"";
+                $lines[] = $line;
+            }
+            if ($lines) {
+                $rulesBlock = "REGLAS DE COMPORTAMIENTO (indicadas por el administrador; tienen PRIORIDAD sobre lo demás, "
+                    . "cúmplelas SIEMPRE):\n" . implode("\n", $lines) . "\n";
+            }
         }
 
         // Regla de comportamiento del soporte según el modo de la línea.
@@ -640,6 +699,7 @@ class CaptureAgent
         - Responde SIEMPRE en español, breve y cordial.
         {$extra}
 
+        {$rulesBlock}
         Devuelve EXCLUSIVAMENTE un objeto JSON válido (sin texto alrededor, sin ```), con esta forma:
         {
           "is_ticket": true|false,          // ¿es una solicitud/reporte de servicio?

@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\KnowledgeController;
 use App\Http\Controllers\Api\PortalKnowledgeController;
 use App\Http\Controllers\Api\CaptureSimulatorController;
 use App\Http\Controllers\Api\CaptureInboxController;
+use App\Http\Controllers\Api\CaptureAgentRuleController;
 use App\Http\Controllers\Api\SolicitanteController;
 use App\Http\Controllers\Api\CaptureContactController;
 use App\Http\Controllers\Api\AppChatController;
@@ -113,6 +114,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/captacion/conversations/{conversation}',           [CaptureInboxController::class, 'show']);
     Route::post('/captacion/conversations/{conversation}/messages', [CaptureInboxController::class, 'send']);
     Route::patch('/captacion/conversations/{conversation}/handling',[CaptureInboxController::class, 'setHandling']);
+
+    // Reglas de comportamiento del agente (superadmin): se inyectan en el prompt del CaptureAgent.
+    Route::get('/captacion/agent-rules',                 [CaptureAgentRuleController::class, 'index']);
+    Route::get('/captacion/agent-rules/options',         [CaptureAgentRuleController::class, 'options']);
+    Route::post('/captacion/agent-rules',                [CaptureAgentRuleController::class, 'store']);
+    Route::put('/captacion/agent-rules/{rule}',          [CaptureAgentRuleController::class, 'update']);
+    Route::delete('/captacion/agent-rules/{rule}',       [CaptureAgentRuleController::class, 'destroy']);
 
     // Chat de asistente dentro de la app (usuario autenticado → mismo agente de captación).
     Route::get('/app-chat',       [AppChatController::class, 'index']);
