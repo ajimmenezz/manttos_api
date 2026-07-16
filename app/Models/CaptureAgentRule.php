@@ -19,6 +19,7 @@ class CaptureAgentRule extends Model
         'scope', 'channel_id', 'catalog_id', 'title', 'instruction',
         'example_bad', 'example_good', 'is_active', 'sort_order',
         'created_by', 'source_conversation_id', 'source_context',
+        'ai_score', 'ai_review',
     ];
 
     protected function casts(): array
@@ -26,6 +27,8 @@ class CaptureAgentRule extends Model
         return [
             'is_active'      => 'boolean',
             'sort_order'     => 'integer',
+            'ai_score'       => 'integer',
+            'ai_review'      => 'array',
             'source_context' => 'array',
         ];
     }

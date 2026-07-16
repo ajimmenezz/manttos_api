@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Catalog;
 use App\Models\Channel;
 use App\Models\CaptureAgentRule;
+use App\Services\Capture\AgentRuleAnalyzer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -86,6 +87,33 @@ class CaptureAgentRuleController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    /** Evalúa un borrador de regla con la IA (puntaje 0-100 + recomendaciones). */
+    public function analyze(Request $request, AgentRuleAnalyzer $analyzer): JsonResponse
+    {
+        $this->authorizeSuper($request);
+
+        $data = $request->validate([
+            'scope'        => ['nullable', 'string'],
+            'title'        => ['nullable', 'string', 'max:160'],
+            'instruction'  => ['required', 'string', 'max:2000'],
+            'example_good' => ['nullable', 'string', 'max:2000'],
+            'example_bad'  => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $labels = [
+            CaptureAgentRule::SCOPE_GLOBAL  => 'Global (todas las líneas)',
+            CaptureAgentRule::SCOPE_CHANNEL => 'Una línea específica',
+            CaptureAgentRule::SCOPE_SYSTEM  => 'Un sistema específico',
+        ];
+        $data['scope_label'] = $labels[$data['scope'] ?? ''] ?? 'Global (todas las líneas)';
+
+        try {
+            return response()->json($analyzer->analyze($data));
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
     // ── Internos ─────────────────────────────────────────────────────
 
     /** @return array<string,mixed> */
@@ -101,6 +129,8 @@ class CaptureAgentRuleController extends Controller
             'example_good'           => ['nullable', 'string', 'max:2000'],
             'is_active'              => ['boolean'],
             'sort_order'             => ['nullable', 'integer'],
+            'ai_score'               => ['nullable', 'integer', 'min:0', 'max:100'],
+            'ai_review'              => ['nullable', 'array'],
             'source_conversation_id' => ['nullable', 'exists:capture_conversations,id'],
             'source_context'         => ['nullable', 'array'],
         ], [], [
@@ -130,6 +160,8 @@ class CaptureAgentRuleController extends Controller
             'example_good'  => $r->example_good,
             'is_active'     => (bool) $r->is_active,
             'sort_order'    => $r->sort_order,
+            'ai_score'      => $r->ai_score,
+            'ai_review'     => $r->ai_review,
             'author'        => optional($r->author)->name,
             'source_conversation_id' => $r->source_conversation_id,
             'source_context' => $r->source_context,

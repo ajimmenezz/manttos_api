@@ -118,6 +118,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Reglas de comportamiento del agente (superadmin): se inyectan en el prompt del CaptureAgent.
     Route::get('/captacion/agent-rules',                 [CaptureAgentRuleController::class, 'index']);
     Route::get('/captacion/agent-rules/options',         [CaptureAgentRuleController::class, 'options']);
+    Route::post('/captacion/agent-rules/analyze',        [CaptureAgentRuleController::class, 'analyze']);
     Route::post('/captacion/agent-rules',                [CaptureAgentRuleController::class, 'store']);
     Route::put('/captacion/agent-rules/{rule}',          [CaptureAgentRuleController::class, 'update']);
     Route::delete('/captacion/agent-rules/{rule}',       [CaptureAgentRuleController::class, 'destroy']);
