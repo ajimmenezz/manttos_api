@@ -93,6 +93,12 @@ class CaptureAgent
         $siteId   = $this->validId($decision['site_id'] ?? null, $sites->pluck('id'));
         $systemId = $this->validId($decision['system_id'] ?? null, $this->systemIdsForSite($sites, $siteId));
 
+        // Guardia anti-alucinación: el modelo NO debe afirmar que ya registró el reporte ni
+        // inventar un folio. La confirmación real la pone el backend tras crear el evento
+        // (sobrescribe este reply). Si menciona un folio que no existe en los eventos del
+        // contacto, se sanea aquí (aplica a bandeja real Y simulador, que reusan respond()).
+        $reply = $this->sanitizeReply(trim((string) ($decision['reply'] ?? '')), $events, (bool) ($decision['ready'] ?? false));
+
         return [
             'ok'          => true,
             'is_ticket'   => (bool) ($decision['is_ticket'] ?? false),
@@ -107,7 +113,7 @@ class CaptureAgent
             'device_id'   => $this->validId($decision['device_id'] ?? null, collect($deviceCandidates)->pluck('id')),
             // Solo listo si hay lo mínimo Y el modelo lo marcó (tras confirmar con el usuario).
             'ready'       => (bool) ($decision['ready'] ?? false) && $siteId && $systemId && ! empty($decision['description']),
-            'reply'       => trim((string) ($decision['reply'] ?? '')) ?: 'Cuéntame, ¿qué necesitas reportar?',
+            'reply'       => $reply ?: 'Cuéntame, ¿qué necesitas reportar?',
             // Memoria acumulada del contacto/contexto para no re-preguntar en el mismo hilo.
             'memory'      => isset($decision['memory']) ? (trim((string) $decision['memory']) ?: null) : null,
             // Soporte 1er nivel: el cliente confirmó que se resolvió con la guía (no crear ticket).
@@ -613,8 +619,17 @@ class CaptureAgent
         - NUNCA inventes sitios, sistemas ni datos. Si no puedes mapear lo que dice a la lista,
           ofrece las opciones disponibles.
         - Cuando ya tengas sitio + sistema + descripción, RESUME lo entendido (incluye el sitio y
-          su cliente) y pide confirmación ("¿Es correcto? Responde sí para registrarlo"). Marca
-          ready=true SOLO cuando la persona confirme.
+          su cliente) y pide confirmación EN FUTURO/CONDICIONAL, nunca en pasado ("¿Lo registro?
+          Responde sí para levantarlo"). Marca ready=true SOLO cuando la persona confirme.
+        - REGLA CRÍTICA (NO INVENTAR REGISTROS): tu `reply` NUNCA debe afirmar que el reporte ya
+          quedó registrado, generado, levantado o creado, NI mencionar o inventar un folio/número de
+          reporte. La PLATAFORMA envía automáticamente la confirmación con el folio REAL cuando el
+          evento se crea; tú no lo sabes. Cuando la persona confirme (ready=true), tu reply debe decir
+          que lo vas a registrar ("Perfecto, lo registro ahora mismo"), NO que ya está hecho. Prohibido
+          escribir cosas como "he registrado", "quedó registrado", "tu folio es…" o similares.
+        - FOLIOS: solo puedes mencionar un folio si aparece EXACTO en "EVENTOS YA REPORTADOS". Si te
+          preguntan por un folio que no está ahí, NO lo inventes: di que lo verificará uno de nuestros
+          agentes de solución.
         - Tras registrar un evento, si la persona AGREGA más detalles del MISMO reporte, agradécelo
           y dile que queda anotado para el técnico asignado (no necesitas crear otro evento). Si es
           una falla DISTINTA, trátala como un reporte nuevo desde cero.
@@ -636,7 +651,8 @@ class CaptureAgent
           "priority": "baja"|"media"|"alta"|"critica"|null,
           "ready": true|false,              // true SOLO tras la confirmación explícita del usuario
           "resolved": true|false,           // SOLO en soporte "resolver primero": el cliente confirmó que se solucionó con la guía (no crear evento)
-          "reply": string,                  // el mensaje que se le enviará a la persona ahora
+          "reply": string,                  // el mensaje que se le enviará a la persona ahora. NUNCA
+                                            // afirmes que el reporte ya quedó registrado ni inventes folios.
           "memory": string                  // MEMORIA actualizada y BREVE del contacto (sitio/cliente habitual,
                                             // datos útiles, pendientes). Reescríbela completa cada vez, máx ~600 caracteres.
         }
@@ -659,6 +675,47 @@ class CaptureAgent
         $data = json_decode($json, true);
 
         return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Evita que el `reply` del modelo mienta sobre el registro: (1) si menciona un folio que
+     * NO existe en los eventos reales del contacto, lo trata como inventado; (2) si además
+     * afirma en pasado que ya quedó registrado/generado, reemplaza el mensaje. NO toca el
+     * caso legítimo de creación: ese reply lo pone el backend DESPUÉS (sobrescribe este).
+     *
+     * @param  array<int,array<string,mixed>>  $events  eventos reales del contacto (con folio)
+     */
+    private function sanitizeReply(string $reply, array $events, bool $ready): string
+    {
+        if ($reply === '') {
+            return $reply;
+        }
+
+        $upper = mb_strtoupper($reply);
+        $known = collect($events)->pluck('folio')->filter()->map(fn ($f) => mb_strtoupper((string) $f))->all();
+
+        // Folios tipo ABC-2026-0007 mencionados en el reply; los que no existen = inventados.
+        preg_match_all('/\b[A-Z][A-Z0-9]{1,}-\d{4}-\d{3,}\b/u', $upper, $m);
+        $fabricated = array_values(array_filter($m[0] ?? [], fn ($f) => ! in_array($f, $known, true)));
+
+        // Afirmación EN PASADO de que ya se registró/creó (sin que el backend lo confirme).
+        $claimsDone = (bool) preg_match(
+            '/\b(qued[oó]|ha|he|hemos|fue|dej[eé]|se)\b[^.?!]{0,40}\b(regist|gener|levant|cread)/iu',
+            $reply,
+        );
+        // ¿Cita un folio REAL del contacto? Entonces es un estatus legítimo, no una alucinación.
+        $mentionsKnownFolio = collect($known)->contains(fn ($f) => str_contains($upper, $f));
+
+        // Sanea solo si inventó un folio, o afirma haber registrado SIN respaldo de un folio real.
+        if (empty($fabricated) && ! ($claimsDone && ! $mentionsKnownFolio)) {
+            return $reply;
+        }
+
+        // Reemplazo seguro: si ya tenía todo listo, se está por registrar (el backend lo hará y
+        // pondrá el folio real); si no, pide continuar sin prometer un registro inexistente.
+        return $ready
+            ? 'Perfecto, lo estoy registrando; en un momento te confirmo con el número de reporte.'
+            : 'Con gusto te ayudo a levantar el reporte. ¿Me confirmas los datos para registrarlo?';
     }
 
     private function validId($value, $allowed): ?int
