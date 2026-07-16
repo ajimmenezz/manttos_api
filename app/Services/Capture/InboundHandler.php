@@ -25,11 +25,17 @@ class InboundHandler
         private WhatsAppClient $whatsapp,
     ) {}
 
-    public function handle(Channel $channel, string $externalId, ?string $name, string $text, ?string $externalMessageId, ?string $username = null, ?User $knownUser = null): void
+    /**
+     * @param  array<int,string>  $imageUrls  fotos adjuntas al mensaje (URLs públicas ya
+     *                                          guardadas): el agente las "ve" y se atan al evento.
+     */
+    public function handle(Channel $channel, string $externalId, ?string $name, string $text, ?string $externalMessageId, ?string $username = null, ?User $knownUser = null, array $imageUrls = []): void
     {
         if (! $channel->is_active) {
             return;
         }
+
+        $imageUrls = array_values(array_filter($imageUrls, fn ($u) => is_string($u) && $u !== ''));
 
         $contact = $this->resolveContact($channel, $externalId, $name, $username, $knownUser);
 
@@ -50,13 +56,15 @@ class InboundHandler
                 'handling'   => 'ai',
             ]);
 
-        // Guarda el entrante + marca no leído para la bandeja.
+        // Guarda el entrante + marca no leído para la bandeja. Las fotos viajan en el
+        // payload para que la bandeja las muestre como miniaturas.
         CaptureMessage::create([
             'conversation_id'     => $conversation->id,
             'channel_id'          => $channel->id,
             'direction'           => 'in',
             'external_message_id' => $externalMessageId,
             'body'                => $text,
+            'payload'             => $imageUrls ? ['images' => $imageUrls] : null,
             'created_at'          => now(),
         ]);
         $conversation->update([
@@ -89,9 +97,16 @@ class InboundHandler
             return;
         }
 
-        // Agente: decide y arma la respuesta.
-        $decision = $this->agent->respond($conversation->fresh('messages'));
+        // Agente: decide y arma la respuesta. Ve las fotos de ESTE turno (visión).
+        $decision = $this->agent->respond($conversation->fresh('messages'), 'captacion', $imageUrls);
         $reply = $decision['reply'];
+
+        // Fotos PENDIENTES del reporte: se acumulan turno a turno (la persona suele
+        // mandar la foto y confirmar después) y se atan al evento cuando se cree.
+        $pendingImages = array_values(array_unique(array_merge(
+            array_map('strval', (array) ($conversation->state['pending_images'] ?? [])),
+            $imageUrls,
+        )));
 
         // ¿Listo? → levantar el evento al pool. Idempotencia POR REPORTE (firma
         // sitio+sistema+descripción): repetir la confirmación no duplica; una falla
@@ -135,11 +150,13 @@ class InboundHandler
                 $ticketKey, // idempotencia del alta
                 $conversation->contact->user, // solicitante reconocido (si lo hay)
                 $deviceId, // dispositivo resuelto (o null)
+                $pendingImages, // fotos acumuladas del reporte
             );
 
             if ($result['ok']) {
                 $folio   = $result['folio'] ?? null;
                 $eventId = $result['event_id'] ?? null;
+                $pendingImages = []; // reporte creado → limpia las fotos pendientes
 
                 // Checkpoint en el hilo (no se envía por el canal).
                 CaptureMessage::create([
@@ -176,6 +193,9 @@ class InboundHandler
         ];
         if ($keepCandidates) {
             $state['device_candidates'] = $keepCandidates;
+        }
+        if ($pendingImages) {
+            $state['pending_images'] = $pendingImages; // se conservan hasta crear el evento
         }
         $conversation->fill([
             'state'           => $state,

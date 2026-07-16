@@ -39,15 +39,18 @@ class AppChatController extends Controller
         $data = $request->validate([
             'body'              => 'required|string|max:4000',
             'client_message_id' => 'nullable|string|max:64',
+            'images'            => 'nullable|array|max:10',
+            'images.*'          => 'string|max:1000',
         ]);
 
         $user    = $request->user();
         $channel = $this->channel();
         $extId   = 'user:' . $user->id;
         $msgId   = $request->filled('client_message_id') ? 'app:' . $data['client_message_id'] : null;
+        $images  = array_values($data['images'] ?? []);
 
         // Reusa el pipeline de captación; knownUser = el usuario autenticado (identidad + alcance).
-        $this->inbound->handle($channel, $extId, $user->name, $data['body'], $msgId, null, $user);
+        $this->inbound->handle($channel, $extId, $user->name, $data['body'], $msgId, null, $user, $images);
 
         $conv = $this->conversationFor($channel, $user);
 

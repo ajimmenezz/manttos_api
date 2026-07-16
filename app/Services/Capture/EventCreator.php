@@ -18,9 +18,11 @@ use App\Services\Ai\Support\ControllerInvoker;
 class EventCreator
 {
     /**
+     * @param  array<int,string>  $images  fotos (URLs públicas) que la persona adjuntó; se
+     *                                       guardan en el evento y habilitan el diagnóstico por foto.
      * @return array{ok:bool, folio?:string, event_id?:int, error?:string}
      */
-    public function create(Channel $channel, int $siteId, int $systemId, string $description, ?string $priority, ?string $clientUuid = null, ?User $requester = null, ?int $deviceId = null): array
+    public function create(Channel $channel, int $siteId, int $systemId, string $description, ?string $priority, ?string $clientUuid = null, ?User $requester = null, ?int $deviceId = null, array $images = []): array
     {
         $user = $this->attributionUser($channel, $requester);
         if (! $user) {
@@ -41,6 +43,11 @@ class EventCreator
             'device_id'     => $deviceId,
             'client_uuid'   => $clientUuid,
         ], fn ($v) => $v !== null);
+
+        $images = array_values(array_filter($images, fn ($u) => is_string($u) && $u !== ''));
+        if ($images !== []) {
+            $payload['images'] = $images;
+        }
 
         $res = ControllerInvoker::post(EventController::class, 'store', $user, $payload);
 

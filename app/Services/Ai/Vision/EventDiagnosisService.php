@@ -6,7 +6,6 @@ use App\Models\AiDocument;
 use App\Models\Event;
 use App\Services\Ai\AiUsageLogger;
 use App\Services\Ai\Rag\RagService;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Diagnóstico INICIAL DE APOYO para un evento a partir de sus fotos + descripción,
@@ -20,7 +19,6 @@ use Illuminate\Support\Facades\Storage;
 class EventDiagnosisService
 {
     private const MAX_IMAGES = 4;
-    private const MEDIA_DIR   = 'maintenance-media';
 
     private const DISCLAIMER = 'Diagnóstico de apoyo generado por IA a partir de las fotos y la descripción. Es orientativo: valida en sitio antes de actuar.';
 
@@ -108,34 +106,7 @@ class EventDiagnosisService
      */
     private function loadImages(array $urls): array
     {
-        $disk = Storage::disk('public');
-        $out = [];
-        foreach (array_slice($urls, 0, self::MAX_IMAGES) as $url) {
-            $base = basename((string) parse_url((string) $url, PHP_URL_PATH));
-            $rel  = self::MEDIA_DIR . '/' . $base;
-            if ($base === '' || ! $disk->exists($rel)) {
-                continue;
-            }
-            $bytes = $disk->get($rel);
-            if ($bytes === null || $bytes === '') {
-                continue;
-            }
-            $out[] = [
-                'mime' => $this->mimeFor($base),
-                'data' => base64_encode($bytes),
-            ];
-        }
-        return $out;
-    }
-
-    private function mimeFor(string $name): string
-    {
-        return match (strtolower(pathinfo($name, PATHINFO_EXTENSION))) {
-            'png'         => 'image/png',
-            'webp'        => 'image/webp',
-            'gif'         => 'image/gif',
-            default       => 'image/jpeg',
-        };
+        return ImageLoader::fromUrls($urls, self::MAX_IMAGES);
     }
 
     /** Recupera del manual del sistema, priorizando códigos de error/anomalías vistos. */

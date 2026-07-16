@@ -5,8 +5,10 @@ namespace App\Services\Capture;
 use App\Models\Catalog;
 use App\Models\CaptureConversation;
 use App\Models\CaptureMessage;
+use App\Models\Event;
 use App\Models\Site;
 use App\Services\Ai\Rag\RagService;
+use App\Services\Ai\Vision\EventDiagnosisService;
 
 /**
  * Motor del SIMULADOR del agente de captación: corre el MISMO CaptureAgent +
@@ -20,20 +22,26 @@ class SimulatorService
     public function __construct(
         private CaptureAgent $agent,
         private EventCreator $creator,
+        private EventDiagnosisService $diagnosis,
     ) {}
 
     /**
      * Procesa un turno del simulador y devuelve todo lo que el tester necesita ver:
      * respuesta, decisión, conocimiento usado, tokens y el ticket (simulado o real).
+     *
+     * @param  array<int,string>  $imageUrls  fotos adjuntas al mensaje simulado (URLs públicas)
      */
-    public function turn(CaptureConversation $conv, string $text, bool $createReal = false): array
+    public function turn(CaptureConversation $conv, string $text, bool $createReal = false, array $imageUrls = []): array
     {
         $channel = $conv->channel;
+        $imageUrls = array_values(array_filter($imageUrls, fn ($u) => is_string($u) && $u !== ''));
 
-        // Guarda el entrante.
+        // Guarda el entrante (las fotos viajan en el payload, como en la bandeja real).
         CaptureMessage::create([
             'conversation_id' => $conv->id, 'channel_id' => $channel->id,
-            'direction' => 'in', 'body' => $text, 'created_at' => now(),
+            'direction' => 'in', 'body' => $text,
+            'payload' => $imageUrls ? ['images' => $imageUrls] : null,
+            'created_at' => now(),
         ]);
         $conv->update(['last_inbound_at' => now(), 'last_message_at' => now()]);
 
@@ -47,9 +55,15 @@ class SimulatorService
             return $this->result($conv, $reply, null, [], ['input' => 0, 'output' => 0], null, null, true);
         }
 
-        // Agente (consumo etiquetado como 'tester').
-        $decision = $this->agent->respond($conv->fresh('messages'), 'tester');
+        // Agente (consumo etiquetado como 'tester'). Ve las fotos de este turno (visión).
+        $decision = $this->agent->respond($conv->fresh('messages'), 'tester', $imageUrls);
         $reply = $decision['reply'];
+
+        // Fotos PENDIENTES del reporte (acumuladas turno a turno hasta crear el evento).
+        $pendingImages = array_values(array_unique(array_merge(
+            array_map('strval', (array) ($conv->state['pending_images'] ?? [])),
+            $imageUrls,
+        )));
 
         // Resolución / desambiguación de dispositivo (misma lógica que la bandeja real).
         $deviceId = null; $defer = false; $keepCandidates = null; $candidates = [];
@@ -70,20 +84,22 @@ class SimulatorService
         $lastKey    = $conv->state['last_ticket_key'] ?? null;
         $createdKey = $lastKey;
 
-        $simulatedTicket = null; $createdEvent = null;
+        $simulatedTicket = null; $createdEvent = null; $diagnosis = null;
         $wouldCreate = ! $defer && empty($decision['resolved']) && $decision['ready']
             && $decision['site_id'] && $decision['system_id'] && $decision['description'] && $ticketKey !== $lastKey;
 
         if ($wouldCreate) {
             $payload = $this->ticketPayload($decision, $deviceId, $candidates);
+            $payload['imagenes'] = count($pendingImages); // cuántas fotos se atarían
 
             if ($createReal) {
                 $result = $this->creator->create($channel, (int) $decision['site_id'], (int) $decision['system_id'],
-                    (string) $decision['description'], $decision['priority'] ?? null, $ticketKey, $contact->user, $deviceId);
+                    (string) $decision['description'], $decision['priority'] ?? null, $ticketKey, $contact->user, $deviceId, $pendingImages);
                 if ($result['ok']) {
                     $createdEvent = ['folio' => $result['folio'] ?? null, 'event_id' => $result['event_id'] ?? null];
                     $conv->event_id = $result['event_id'] ?? null;
                     $createdKey = $ticketKey;
+                    $pendingImages = []; // atadas al evento
                     $reply = ($result['folio'] ?? false)
                         ? "✅ Listo, tu reporte quedó registrado con folio {$result['folio']}. Un técnico lo atenderá pronto."
                         : '✅ Listo, tu reporte quedó registrado.';
@@ -93,6 +109,9 @@ class SimulatorService
                         'payload' => ['type' => 'event_created', 'event_id' => $result['event_id'] ?? null, 'folio' => $result['folio'] ?? null],
                         'created_at' => now(),
                     ]);
+
+                    // Diagnóstico por foto del evento recién creado (para verlo en el simulador).
+                    $diagnosis = $this->diagnoseCreated($result['event_id'] ?? null);
                 } else {
                     $reply = 'Tuve un problema al registrar tu reporte. Detalle: ' . ($result['error'] ?? '');
                 }
@@ -100,7 +119,8 @@ class SimulatorService
                 // DRY-RUN: no se crea nada; se muestra lo que se crearía.
                 $simulatedTicket = $payload;
                 $createdKey = $ticketKey; // no re-simular la misma firma en cada turno
-                $reply = "🧪 (Simulación) Con esto se crearía el evento: {$payload['sistema']} en {$payload['sitio']}. "
+                $imgNote = $pendingImages ? ' Se adjuntarían ' . count($pendingImages) . ' foto(s) y correría el diagnóstico por foto.' : '';
+                $reply = "🧪 (Simulación) Con esto se crearía el evento: {$payload['sistema']} en {$payload['sitio']}.{$imgNote} "
                     . 'En una conversación real, aquí se generaría el folio. Usa "Crear de verdad" si quieres levantarlo.';
             }
         }
@@ -115,16 +135,38 @@ class SimulatorService
             'last_ticket_key' => $createdKey,
         ];
         if ($keepCandidates) $state['device_candidates'] = $keepCandidates;
+        if ($pendingImages) $state['pending_images'] = $pendingImages;
         $conv->fill(['state' => $state, 'last_message_at' => now()]);
         if (! empty($decision['memory'])) $conv->context_summary = $decision['memory'];
         $conv->save();
 
         $this->out($conv, $reply);
 
-        return $this->result($conv, $reply, $decision, $candidates, $decision['usage'] ?? ['input' => 0, 'output' => 0], $simulatedTicket, $createdEvent);
+        $out = $this->result($conv, $reply, $decision, $candidates, $decision['usage'] ?? ['input' => 0, 'output' => 0], $simulatedTicket, $createdEvent);
+        $out['photo_observation'] = $decision['photo_observation'] ?? null;
+        $out['diagnosis'] = $diagnosis;
+
+        return $out;
     }
 
     // ── Internos ─────────────────────────────────────────────────────
+
+    /** Corre el diagnóstico por foto del evento recién creado; null si no aplica/falla. */
+    private function diagnoseCreated(?int $eventId): ?array
+    {
+        if (! $eventId) {
+            return null;
+        }
+        $event = Event::find($eventId);
+        if (! $event || ! $this->diagnosis->canDiagnose($event)) {
+            return null;
+        }
+        try {
+            return $this->diagnosis->diagnose($event);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
 
     /** Datos legibles del ticket que se crearía (dry-run). */
     private function ticketPayload(array $decision, ?int $deviceId, array $candidates): array

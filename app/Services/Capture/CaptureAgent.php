@@ -11,7 +11,10 @@ use App\Services\Ai\AiSettings;
 use App\Services\Ai\Chat\ChatProviderFactory;
 use App\Services\Ai\Rag\RagService;
 use App\Services\Ai\Tools\ToolRegistry;
+use App\Services\Ai\Vision\ImageLoader;
+use App\Services\Ai\Vision\VisionClient;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 
 /**
  * Agente de captación: dado el hilo de una conversación entrante, identifica si
@@ -26,13 +29,15 @@ class CaptureAgent
     private const HISTORY_LIMIT = 40;
 
     /**
+     * @param  array<int,string>  $imageUrls  fotos ADJUNTAS en el turno actual (URLs públicas);
+     *                                          el agente las "ve" vía visión para clasificar.
      * @return array{
      *   ok:bool, is_ticket:bool, site_id:?int, system_id:?int, description:?string,
      *   priority:?string, ready:bool, reply:string, memory:?string,
-     *   usage:array{input:int,output:int}
+     *   photo_observation:?string, usage:array{input:int,output:int}
      * }
      */
-    public function respond(CaptureConversation $conversation, string $usageSource = 'captacion'): array
+    public function respond(CaptureConversation $conversation, string $usageSource = 'captacion', array $imageUrls = []): array
     {
         $channel = $conversation->channel;
         $resolved = AiSettings::resolved();
@@ -49,12 +54,17 @@ class CaptureAgent
         // Candidatos de dispositivo pendientes de elección (de una pregunta previa).
         $deviceCandidates = $conversation->state['device_candidates'] ?? [];
 
+        // Fotos del turno: el agente "ve" lo que envió la persona (visión IA) y usa esa
+        // observación como evidencia para clasificar y redactar el reporte. Degrada a
+        // texto si no hay visión operativa (Ollama no multimodal / sin key / sin fotos).
+        [$photoObs, $visionUsage] = $this->observePhotos($imageUrls, $contact, $usageSource, $resolved);
+
         // Soporte de 1er nivel (RAG por sistema): recupera conocimiento del manual del
         // sistema en curso para que el agente pueda guiar antes/junto con el ticket.
         $supportMode = $channel->supportMode();
         $knowledge = $this->knowledgeFor($conversation, $channel, $contact, $sites, $systems, $supportMode);
 
-        $system = $this->systemPrompt($channel, $contact, $sites, $systems, $events, $deviceCandidates, (string) $conversation->context_summary, $knowledge, $supportMode);
+        $system = $this->systemPrompt($channel, $contact, $sites, $systems, $events, $deviceCandidates, (string) $conversation->context_summary, $knowledge, $supportMode, $photoObs);
         try {
             [$content, $usage] = $this->complete($messages, $system, $resolved);
         } catch (\Throwable $e) {
@@ -62,6 +72,12 @@ class CaptureAgent
         }
 
         $decision = $this->parseJson((string) $content);
+
+        // Consumo total del turno = texto del agente + visión (para el Registro IA / costo).
+        $usage = [
+            'input'  => (int) ($usage['input'] ?? 0) + (int) ($visionUsage['input'] ?? 0),
+            'output' => (int) ($usage['output'] ?? 0) + (int) ($visionUsage['output'] ?? 0),
+        ];
 
         // Registra el consumo del agente (para el Registro IA / control de costo).
         \App\Services\Ai\AiUsageLogger::log($usageSource, $resolved, $usage, [
@@ -71,7 +87,7 @@ class CaptureAgent
         ]);
 
         if ($decision === null) {
-            return $this->fallback('¿Me confirmas qué necesitas reportar?', $usage);
+            return $this->fallback('¿Me confirmas qué necesitas reportar?', $usage, $photoObs);
         }
 
         $siteId   = $this->validId($decision['site_id'] ?? null, $sites->pluck('id'));
@@ -96,8 +112,57 @@ class CaptureAgent
             'memory'      => isset($decision['memory']) ? (trim((string) $decision['memory']) ?: null) : null,
             // Soporte 1er nivel: el cliente confirmó que se resolvió con la guía (no crear ticket).
             'resolved'    => (bool) ($decision['resolved'] ?? false),
+            // Lo que la visión observó en las fotos del turno (para depuración/simulador).
+            'photo_observation' => $photoObs,
             'usage'       => $usage,
         ];
+    }
+
+    /**
+     * Corre un pre-pass de VISIÓN sobre las fotos adjuntas del turno y devuelve una
+     * observación breve en texto (para inyectar en el prompt) + su consumo. Se registra
+     * aparte en el Registro IA (puede usar un modelo de visión distinto al del chat).
+     * Falla suave: si no hay fotos, visión no operativa o error → [null, 0/0].
+     *
+     * @param  array<int,string>  $imageUrls
+     * @return array{0:?string,1:array{input:int,output:int}}
+     */
+    private function observePhotos(array $imageUrls, ?\App\Models\CaptureContact $contact, string $usageSource, array $resolved): array
+    {
+        $urls = array_values(array_filter($imageUrls, fn ($u) => is_string($u) && $u !== ''));
+        if ($urls === []) {
+            return [null, ['input' => 0, 'output' => 0]];
+        }
+
+        $vision = app(VisionClient::class);
+        if (! $vision->isOperational()) {
+            return [null, ['input' => 0, 'output' => 0]];
+        }
+
+        $images = ImageLoader::fromUrls($urls);
+        if ($images === []) {
+            return [null, ['input' => 0, 'output' => 0]];
+        }
+
+        try {
+            $res = $vision->analyze($images, self::PHOTO_SYSTEM, self::PHOTO_PROMPT, 400);
+        } catch (\Throwable) {
+            return [null, ['input' => 0, 'output' => 0]];
+        }
+
+        $obs = trim((string) ($res['text'] ?? ''));
+        if ($obs === '') {
+            return [null, $res['usage'] ?? ['input' => 0, 'output' => 0]];
+        }
+
+        // El consumo de visión se registra por separado (modelo/precio pueden diferir).
+        \App\Services\Ai\AiUsageLogger::log($usageSource, $res['resolved'] ?? $resolved, $res['usage'] ?? ['input' => 0, 'output' => 0], [
+            'user_id' => optional($contact)->user_id,
+            'prompt'  => 'Observación de fotos adjuntas (captación)',
+            'reply'   => Str::limit($obs, 400),
+        ]);
+
+        return [$obs, $res['usage'] ?? ['input' => 0, 'output' => 0]];
     }
 
     /**
@@ -396,7 +461,7 @@ class CaptureAgent
             ])->filter(fn ($m) => $m['content'] !== '')->values()->all();
     }
 
-    private function systemPrompt(Channel $channel, ?\App\Models\CaptureContact $contact, $sites, $systems, array $events, array $deviceCandidates = [], string $memory = '', array $knowledge = [], string $supportMode = 'off'): string
+    private function systemPrompt(Channel $channel, ?\App\Models\CaptureContact $contact, $sites, $systems, array $events, array $deviceCandidates = [], string $memory = '', array $knowledge = [], string $supportMode = 'off', ?string $photoObservation = null): string
     {
         $agent = $channel->agent_name ?: 'Asistente';
         $extra = trim((string) $channel->instructions);
@@ -439,6 +504,16 @@ class CaptureAgent
         $devicesBlock = ! empty($deviceCandidates)
             ? "DISPOSITIVOS CANDIDATOS (la persona debe elegir uno de estos; empátalos con lo que responda —por nombre, por número de la lista o por descripción como 'el de la línea 11'— y pon su id en \"device_id\". Si dice \"ninguno\"/\"no importa\", device_id=null). Elegir el dispositivo NO cambia que el reporte ya esté confirmado: si ya estaba listo, mantén ready=true:\n"
                 . json_encode(array_values($deviceCandidates), JSON_UNESCAPED_UNICODE) . "\n"
+            : '';
+
+        // Observación de las FOTOS adjuntas del turno (visión IA): evidencia para
+        // clasificar el sistema y redactar la descripción, aunque el texto sea pobre.
+        $photoObservation = trim((string) $photoObservation);
+        $photoBlock = $photoObservation !== ''
+            ? "OBSERVACIÓN DE LAS FOTOS QUE ADJUNTÓ LA PERSONA (visión IA sobre las imágenes de este mensaje; "
+                . "trátala como EVIDENCIA para deducir el sistema/equipo y redactar una descripción concreta del "
+                . "síntoma; combínala con lo que escribió). NO le pidas que describa de nuevo lo que ya se ve en la foto:\n"
+                . $photoObservation . "\n"
             : '';
 
         // Eventos ya levantados por este contacto (para responder por su estatus).
@@ -499,6 +574,7 @@ class CaptureAgent
         {$memoryBlock}
         {$eventsBlock}
         {$devicesBlock}
+        {$photoBlock}
         {$knowledgeBlock}
         Datos que necesitas para levantar el evento (obligatorios): SITIO, SISTEMA y DESCRIPCIÓN.
         La prioridad es opcional (baja/media/alta/critica); si la persona transmite urgencia, súbela.
@@ -530,6 +606,10 @@ class CaptureAgent
         - DISPOSITIVO: si la persona menciona un equipo puntual (una serie/clave como "DH99A78", un nombre
           o una ubicación de dispositivo), ponlo en "device_hint" tal cual lo dijo, para intentar ligar el
           evento a ese dispositivo. No inventes claves; si no menciona ninguno, device_hint = null.
+        - FOTOS: la persona puede adjuntar fotos. Si hay "OBSERVACIÓN DE LAS FOTOS", úsala como evidencia
+          fuerte para identificar el sistema/equipo y redactar la descripción, aunque escriba poco o nada.
+          Si en la foto se lee una serie/clave de equipo, considérala para "device_hint". No inventes lo que
+          no esté en la observación; si la foto no basta para saber el síntoma, pide UNA aclaración breve.
         - NUNCA inventes sitios, sistemas ni datos. Si no puedes mapear lo que dice a la lista,
           ofrece las opciones disponibles.
         - Cuando ya tengas sitio + sistema + descripción, RESUME lo entendido (incluye el sitio y
@@ -593,12 +673,22 @@ class CaptureAgent
         return in_array($v, ['baja', 'media', 'alta', 'critica'], true) ? $v : null;
     }
 
-    private function fallback(string $reply, array $usage = ['input' => 0, 'output' => 0]): array
+    private function fallback(string $reply, array $usage = ['input' => 0, 'output' => 0], ?string $photoObs = null): array
     {
         return [
             'ok' => true, 'is_ticket' => false, 'site_id' => null, 'system_id' => null,
             'description' => null, 'priority' => null, 'device_hint' => null, 'device_id' => null,
-            'ready' => false, 'reply' => $reply, 'memory' => null, 'usage' => $usage,
+            'ready' => false, 'reply' => $reply, 'memory' => null,
+            'photo_observation' => $photoObs, 'usage' => $usage,
         ];
     }
+
+    /** Prompt de visión para el pre-pass del agente (observación breve de las fotos). */
+    private const PHOTO_SYSTEM = 'Eres un técnico de sistemas de seguridad electrónica (CCTV, control de acceso, alarmas, detección de incendio). Observas fotos de equipos en sitio y describes objetivamente lo relevante para un reporte de mantenimiento. No inventas nada que no sea visible.';
+
+    private const PHOTO_PROMPT = "Describe en 2-4 frases lo útil para un reporte de mantenimiento que se vea en las fotos: "
+        . "tipo de equipo, marca/modelo o número de serie si es legible, indicadores/LED, mensajes o códigos de error "
+        . "en pantalla, y cualquier anomalía visible (daño, desconexión, humo, agua, cableado suelto, etc.). "
+        . "Si hay texto/serie legible, cítalo entre comillas. No des diagnóstico ni recomendaciones; solo describe lo que se ve. "
+        . "Responde en español, en texto plano (sin JSON).";
 }

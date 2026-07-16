@@ -145,7 +145,7 @@ class ChannelController extends Controller
         abort_unless($request->user()->can('channels.manage'), 403);
         abort_unless($conversation->channel_id === $channel->id, 404);
 
-        return response()->json($conversation->messages()->get(['id', 'direction', 'body', 'created_at']));
+        return response()->json($conversation->messages()->get(['id', 'direction', 'body', 'payload', 'created_at']));
     }
 
     // ── Internos ─────────────────────────────────────────────────────

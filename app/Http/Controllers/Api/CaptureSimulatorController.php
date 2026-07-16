@@ -90,12 +90,14 @@ class CaptureSimulatorController extends Controller
         $data = $request->validate([
             'message'     => 'required|string|max:2000',
             'create_real' => 'boolean',
+            'images'      => 'nullable|array|max:10',
+            'images.*'    => 'string|max:1000',
         ]);
 
         $conv = $this->currentConversation($request->user());
         abort_if(! $conv, 422, 'No hay una sesión de simulación activa. Inicia una.');
 
-        $result = $sim->turn($conv, $data['message'], (bool) ($data['create_real'] ?? false));
+        $result = $sim->turn($conv, $data['message'], (bool) ($data['create_real'] ?? false), array_values($data['images'] ?? []));
 
         return response()->json([
             'result'   => $result,

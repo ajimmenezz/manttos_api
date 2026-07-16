@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Models\Channel;
+use App\Services\Ai\Vision\ImageLoader;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -59,6 +60,36 @@ class TelegramClient
     public function deleteWebhook(Channel $channel): array
     {
         return $this->call($channel, 'deleteWebhook', []);
+    }
+
+    /**
+     * Descarga un archivo por file_id (getFile → file/bot{token}/{path}) y lo guarda en
+     * el disco público de media de captación; devuelve su URL. Null si falla (no rompe
+     * la captación: el mensaje se procesa sin la foto).
+     */
+    public function downloadFile(Channel $channel, string $fileId): ?string
+    {
+        $token = $channel->token();
+        if (! $token || $fileId === '') {
+            return null;
+        }
+
+        try {
+            $meta = $this->call($channel, 'getFile', ['file_id' => $fileId]);
+            $path = $meta['file_path'] ?? null;
+            if (! $path) {
+                return null;
+            }
+
+            $res = Http::timeout(60)->get(self::API . "/file/bot{$token}/{$path}");
+            if ($res->failed()) {
+                return null;
+            }
+
+            return ImageLoader::store($res->body(), pathinfo((string) $path, PATHINFO_EXTENSION) ?: 'jpg');
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     // ── Internos ────────────────────────────────────────────

@@ -3,6 +3,7 @@
 namespace App\Services\WhatsApp;
 
 use App\Models\Channel;
+use App\Services\Ai\Vision\ImageLoader;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -42,6 +43,51 @@ class WhatsAppClient
         }
 
         return $response->json('messages.0.id');
+    }
+
+    /**
+     * Descarga media entrante por su media_id (Graph: GET /{id} → url; luego se baja el
+     * binario con el mismo bearer) y la guarda en el disco público de captación; devuelve
+     * su URL. Null si falla (el mensaje se procesa sin la foto).
+     */
+    public function downloadMedia(Channel $channel, string $mediaId): ?string
+    {
+        $token = $channel->token();
+        if (! $token || $mediaId === '') {
+            return null;
+        }
+
+        $version = config('whatsapp.api_version', 'v21.0');
+        $base    = rtrim((string) config('whatsapp.base_url', 'https://graph.facebook.com'), '/');
+
+        try {
+            $meta = Http::withToken($token)->acceptJson()->timeout(30)->get("{$base}/{$version}/{$mediaId}");
+            if ($meta->failed()) {
+                return null;
+            }
+            $url  = (string) $meta->json('url');
+            $mime = (string) $meta->json('mime_type');
+            if ($url === '') {
+                return null;
+            }
+
+            // La descarga del binario también requiere el bearer de la app.
+            $bin = Http::withToken($token)->timeout(60)->get($url);
+            if ($bin->failed()) {
+                return null;
+            }
+
+            $ext = match (true) {
+                str_contains($mime, 'png')  => 'png',
+                str_contains($mime, 'webp') => 'webp',
+                str_contains($mime, 'gif')  => 'gif',
+                default                     => 'jpg',
+            };
+
+            return ImageLoader::store($bin->body(), $ext);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
