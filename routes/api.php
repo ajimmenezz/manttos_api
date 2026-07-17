@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\DirectoryController;
 use App\Http\Controllers\Api\EventCommentController;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
+use App\Http\Controllers\Api\ServiceSheetExportController;
 use App\Http\Controllers\Api\EventTypeController;
 use App\Http\Controllers\Api\UserPreferenceController;
 use App\Http\Controllers\Api\EventStatusController;
@@ -327,6 +328,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/fields/{field}',              [ActivityTypeController::class, 'destroyField']);
         Route::post('/link',                         [ActivityTypeController::class, 'linkSystem']);
         Route::delete('/link',                       [ActivityTypeController::class, 'unlinkSystem']);
+        // Automatizaciones a nivel actividad (genera actividad/evento al cumplir condiciones)
+        Route::get('/automations',                   [ActivityTypeController::class, 'automations']);
+        Route::get('/automations/active',            [ActivityTypeController::class, 'activeAutomations']); // runtime captura (web+móvil)
+        Route::get('/automations/options',           [ActivityTypeController::class, 'automationOptions']);
+        Route::post('/automations',                  [ActivityTypeController::class, 'storeAutomation']);
+        Route::post('/automations/reorder',          [ActivityTypeController::class, 'reorderAutomations']);
+        Route::put('/automations/{automation}',      [ActivityTypeController::class, 'updateAutomation']);
+        Route::post('/automations/{automation}/toggle-status', [ActivityTypeController::class, 'toggleAutomation']);
+        Route::delete('/automations/{automation}',   [ActivityTypeController::class, 'destroyAutomation']);
     });
     Route::get('/activity-types/{activityType}/systems', [ActivityTypeController::class, 'systemsWithFields']);
 
@@ -377,6 +387,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/export',          [EventDashboardController::class, 'export']); // antes del wildcard {event}
     Route::get('/events/report-list',     [EventDashboardController::class, 'reportList']); // antes del wildcard {event}
     Route::get('/events/plan-devices',    [EventDashboardController::class, 'planDevices']); // antes del wildcard {event}
+    // Exportación en ZIP de hojas de servicio (segundo plano) — antes del wildcard {event}
+    Route::post('/events/service-sheets',                 [ServiceSheetExportController::class, 'store']);
+    Route::get('/events/service-sheets/{serviceSheetExport}',          [ServiceSheetExportController::class, 'show']);
+    Route::get('/events/service-sheets/{serviceSheetExport}/download', [ServiceSheetExportController::class, 'download']);
 
     // Preferencias de UI por usuario (clave→JSON): p. ej. columnas del reporte de eventos
     Route::get('/me/preferences/{key}',   [UserPreferenceController::class, 'show']);
@@ -384,6 +398,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/sync-bundle',     [EventController::class, 'syncBundle']);  // antes del wildcard {event}
     Route::get('/events/sla-context',     [EventController::class, 'slaContext']);  // antes del wildcard {event}
     Route::get('/events/devices',         [EventController::class, 'deviceOptions']); // antes del wildcard {event}
+    Route::get('/events/device-filters',  [EventController::class, 'deviceFilterOptions']); // antes del wildcard {event}
     Route::get('/events/directory-fields', [EventController::class, 'directoryFields']); // antes del wildcard {event}
     Route::post('/events',                [EventController::class, 'store']);
     Route::get('/events/{event}',         [EventController::class, 'show']);

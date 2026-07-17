@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ScopesEvents;
+use App\Http\Controllers\Api\Concerns\MaintenanceActivityFilters;
 use App\Models\AppSetting;
 use App\Models\Catalog;
 use App\Models\Directory;
@@ -26,6 +27,7 @@ use App\Support\EventSla;
 class EventController extends Controller
 {
     use ScopesEvents;
+    use MaintenanceActivityFilters;
 
     /**
      * Resuelve la fecha de ocurrencia respetando el flag global. Si la captura manual
@@ -554,9 +556,10 @@ class EventController extends Controller
         abort_unless($user->can('events.create') || $user->can('events.view'), 403);
 
         $data = $request->validate([
-            'site_id'   => 'required|exists:sites,id',
-            'system_id' => 'required|exists:catalogs,id',
-            'search'    => 'nullable|string|max:100',
+            'site_id'     => 'required|exists:sites,id',
+            'system_id'   => 'required|exists:catalogs,id',
+            'search'      => 'nullable|string|max:100',
+            'dir_filters' => 'nullable', // filtros por campo del directorio (JSON o array)
         ]);
 
         $site = Site::findOrFail($data['site_id']);
@@ -568,6 +571,13 @@ class EventController extends Controller
         $q = \App\Models\Device::whereHas('directory', fn ($d) =>
                 $d->where('site_id', $data['site_id'])->where('catalog_id', $data['system_id'])->where('is_active', true)
             )->where('is_active', true);
+
+        // Filtros por cualquier campo del directorio (select = igualdad, texto = "contiene").
+        $dirFilters = $this->parseMaintenanceFilters($request)['dir'];
+        if (! empty($dirFilters)) {
+            $meta = $this->directoryFilterMeta((int) $data['system_id'], (int) $data['site_id'], $site->client_id);
+            $this->applyDirectoryFilters($q, $dirFilters, $meta['modes']);
+        }
 
         $search = trim((string) ($data['search'] ?? ''));
         if ($search !== '') {
@@ -614,6 +624,75 @@ class EventController extends Controller
         return response()->json([
             'fields' => $this->directoryFieldDefs($data['system_id'], $data['client_id'] ?? null),
         ]);
+    }
+
+    /**
+     * Filtros disponibles del directorio (sitio × sistema) para el buscador de
+     * dispositivos al ligarlo a un evento: por cada campo filtrable, sus valores
+     * distintos (select de baja cardinalidad) o modo "contiene" (texto).
+     */
+    public function deviceFilterOptions(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user->can('events.create') || $user->can('events.view'), 403);
+
+        $data = $request->validate([
+            'site_id'   => 'required|exists:sites,id',
+            'system_id' => 'required|exists:catalogs,id',
+        ]);
+
+        $site = Site::findOrFail($data['site_id']);
+        abort_unless($this->userCanUseSite($request, $site), 403, 'No tienes acceso a este sitio.');
+
+        $meta = $this->directoryFilterMeta((int) $data['system_id'], (int) $data['site_id'], $site->client_id);
+
+        return response()->json(['directory' => $meta['available']]);
+    }
+
+    /**
+     * Metadatos de los filtros de directorio para un sitio × sistema: los campos
+     * (base + override por cliente, ver directoryFieldDefs) con sus valores distintos
+     * y su modo (select/text según cardinalidad). Reusa valueStrings/umbral del trait
+     * MaintenanceActivityFilters. Devuelve `available` (para la UI) y `modes` (para
+     * aplicar los filtros en deviceOptions).
+     *
+     * @return array{available: array<int,array>, modes: array<string,string>}
+     */
+    private function directoryFilterMeta(int $systemId, int $siteId, ?int $clientId): array
+    {
+        $defs = collect($this->directoryFieldDefs($systemId, $clientId))
+            ->reject(fn ($f) => in_array($f['field_type'], $this->filterSkipTypes, true));
+
+        if ($defs->isEmpty()) {
+            return ['available' => [], 'modes' => []];
+        }
+
+        $devices = \App\Models\Device::whereHas('directory', fn ($d) =>
+                $d->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
+            )->where('is_active', true)->get(['custom_fields']);
+
+        $available = [];
+        $modes = [];
+        foreach ($defs as $f) {
+            $vals = $devices
+                ->flatMap(fn ($d) => $this->valueStrings(
+                    is_array($d->custom_fields) ? ($d->custom_fields[$f['field_key']] ?? null) : null
+                ))
+                ->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values();
+            if ($vals->isEmpty()) continue;
+
+            $mode = $vals->count() <= $this->filterSelectThreshold ? 'select' : 'text';
+            $modes[$f['field_key']] = $mode;
+            $available[] = [
+                'key'        => $f['field_key'],
+                'label'      => $f['label'],
+                'field_type' => $f['field_type'],
+                'mode'       => $mode,
+                'values'     => $mode === 'select' ? $vals->all() : [],
+            ];
+        }
+
+        return ['available' => $available, 'modes' => $modes];
     }
 
     /** Campos activos del directorio de un sistema (base + override por cliente), ordenados. */

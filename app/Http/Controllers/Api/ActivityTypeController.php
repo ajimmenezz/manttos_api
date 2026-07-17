@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ActivityTypeAutomation;
 use App\Models\ActivityTypeField;
 use App\Models\Catalog;
+use App\Models\EventType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -261,5 +263,185 @@ class ActivityTypeController extends Controller
         $field->delete();
 
         return response()->json(['message' => 'Campo eliminado.']);
+    }
+
+    // ─── Automatizaciones a nivel actividad ──────────────────────────────
+
+    /** Lista de automatizaciones de un par (activity_type, system). */
+    public function automations(int $activityTypeId, int $systemId): JsonResponse
+    {
+        abort_unless(auth()->user()->can('catalogs.view'), 403, 'No autorizado para esta acción.');
+        $this->resolveActivityType($activityTypeId);
+        $this->resolveSystem($systemId);
+
+        $rows = ActivityTypeAutomation::with(['targetActivityType:id,label', 'targetEventType:id,label'])
+            ->where('activity_type_id', $activityTypeId)
+            ->where('system_id', $systemId)
+            ->orderBy('sort_order')->orderBy('id')
+            ->get();
+
+        return response()->json($rows->map(fn ($a) => $this->presentAutomation($a)));
+    }
+
+    /**
+     * Automatizaciones ACTIVAS de un par (para el runtime de captura en web y móvil).
+     * Gateado por quien documenta actividades (o config), no por catalogs.view, para que
+     * el ingeniero pueda evaluarlas al guardar. El móvil las cachea en el sync (offline).
+     */
+    public function activeAutomations(int $activityTypeId, int $systemId): JsonResponse
+    {
+        $u = auth()->user();
+        abort_unless($u->can('maintenances.record-activity') || $u->can('catalogs.view'), 403, 'No autorizado para esta acción.');
+        $this->resolveActivityType($activityTypeId);
+        $this->resolveSystem($systemId);
+
+        $rows = ActivityTypeAutomation::with(['targetActivityType:id,label', 'targetEventType:id,label'])
+            ->where('activity_type_id', $activityTypeId)
+            ->where('system_id', $systemId)
+            ->where('is_active', true)
+            ->orderBy('sort_order')->orderBy('id')
+            ->get();
+
+        return response()->json($rows->map(fn ($a) => $this->presentAutomation($a)));
+    }
+
+    /**
+     * Opciones para armar una automatización: destinos posibles (tipos de actividad y
+     * tipos de evento ligados a este sistema). Los campos del origen para las condiciones
+     * ya los tiene el cliente; los del destino se piden al elegirlo (endpoints existentes).
+     */
+    public function automationOptions(int $activityTypeId, int $systemId): JsonResponse
+    {
+        abort_unless(auth()->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+        $this->resolveActivityType($activityTypeId);
+        $this->resolveSystem($systemId);
+
+        $activityTypeIds = DB::table('activity_type_systems')
+            ->where('system_id', $systemId)->pluck('activity_type_id');
+        $activityTypes = Catalog::whereIn('id', $activityTypeIds)
+            ->where('is_active', true)->orderBy('label')->get(['id', 'label']);
+
+        $eventTypeIds = DB::table('event_type_systems')
+            ->where('system_id', $systemId)->pluck('event_type_id');
+        $eventTypes = EventType::whereIn('id', $eventTypeIds)
+            ->where('is_active', true)->orderBy('label')->get(['id', 'label']);
+
+        return response()->json([
+            'activity_types' => $activityTypes,
+            'event_types'    => $eventTypes,
+        ]);
+    }
+
+    public function storeAutomation(Request $request, int $activityTypeId, int $systemId): JsonResponse
+    {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+        $this->resolveActivityType($activityTypeId);
+        $this->resolveSystem($systemId);
+
+        $data = $this->validateAutomation($request);
+
+        $maxOrder = ActivityTypeAutomation::where('activity_type_id', $activityTypeId)
+            ->where('system_id', $systemId)->max('sort_order') ?? -1;
+
+        $automation = ActivityTypeAutomation::create(array_merge($data, [
+            'activity_type_id' => $activityTypeId,
+            'system_id'        => $systemId,
+            'sort_order'       => $maxOrder + 1,
+        ]));
+
+        return response()->json($this->presentAutomation($automation->fresh(['targetActivityType:id,label', 'targetEventType:id,label'])), 201);
+    }
+
+    public function updateAutomation(Request $request, int $activityTypeId, int $systemId, ActivityTypeAutomation $automation): JsonResponse
+    {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+        $this->assertAutomationBelongs($automation, $activityTypeId, $systemId);
+
+        $automation->update($this->validateAutomation($request));
+
+        return response()->json($this->presentAutomation($automation->fresh(['targetActivityType:id,label', 'targetEventType:id,label'])));
+    }
+
+    public function toggleAutomation(Request $request, int $activityTypeId, int $systemId, ActivityTypeAutomation $automation): JsonResponse
+    {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+        $this->assertAutomationBelongs($automation, $activityTypeId, $systemId);
+
+        $automation->update(['is_active' => ! $automation->is_active]);
+
+        return response()->json(['is_active' => $automation->is_active]);
+    }
+
+    public function reorderAutomations(Request $request, int $activityTypeId, int $systemId): JsonResponse
+    {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+        $this->resolveActivityType($activityTypeId);
+        $this->resolveSystem($systemId);
+
+        $ids = $request->validate(['ids' => 'required|array', 'ids.*' => 'integer'])['ids'];
+        DB::transaction(function () use ($ids, $activityTypeId, $systemId) {
+            foreach ($ids as $index => $id) {
+                ActivityTypeAutomation::where('id', $id)
+                    ->where('activity_type_id', $activityTypeId)
+                    ->where('system_id', $systemId)
+                    ->update(['sort_order' => $index]);
+            }
+        });
+
+        return response()->json(['message' => 'Orden guardado.']);
+    }
+
+    public function destroyAutomation(Request $request, int $activityTypeId, int $systemId, ActivityTypeAutomation $automation): JsonResponse
+    {
+        abort_unless($request->user()->can('activity-types.configure'), 403, 'No autorizado para esta acción.');
+        $this->assertAutomationBelongs($automation, $activityTypeId, $systemId);
+
+        $automation->delete();
+
+        return response()->json(['message' => 'Automatización eliminada.']);
+    }
+
+    private function assertAutomationBelongs(ActivityTypeAutomation $automation, int $activityTypeId, int $systemId): void
+    {
+        abort_unless(
+            $automation->activity_type_id === $activityTypeId && $automation->system_id === $systemId,
+            404
+        );
+    }
+
+    private function validateAutomation(Request $request): array
+    {
+        return $request->validate([
+            'name'                     => 'required|string|max:120',
+            'is_active'                => 'boolean',
+            'trigger'                  => 'nullable|array',
+            'action_type'              => 'required|in:activity,event',
+            'target_activity_type_id'  => 'nullable|integer|exists:catalogs,id|required_if:action_type,activity',
+            'target_event_type_id'     => 'nullable|integer|exists:event_types,id|required_if:action_type,event',
+            'prefill'                  => 'nullable|array',
+            'prefill.*.target_field_key' => 'required|string|max:60',
+            'prefill.*.mode'           => 'required|in:constant,copy',
+            'prefill.*.value'          => 'nullable',
+            'prefill.*.source'         => 'nullable|in:form,device',
+            'prefill.*.source_field_key' => 'nullable|string|max:60',
+        ]);
+    }
+
+    private function presentAutomation(ActivityTypeAutomation $a): array
+    {
+        return [
+            'id'                      => $a->id,
+            'name'                    => $a->name,
+            'is_active'               => $a->is_active,
+            'sort_order'              => $a->sort_order,
+            'trigger'                 => $a->trigger,
+            'action_type'             => $a->action_type,
+            'target_activity_type_id' => $a->target_activity_type_id,
+            'target_event_type_id'    => $a->target_event_type_id,
+            'target_label'            => $a->action_type === 'event'
+                ? ($a->targetEventType->label ?? null)
+                : ($a->targetActivityType->label ?? null),
+            'prefill'                 => $a->prefill ?? [],
+        ];
     }
 }
