@@ -55,6 +55,7 @@ use App\Http\Controllers\Api\SiteUserController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\ConversationLinkController;
+use App\Http\Controllers\Api\DeviceTokenController;
 use App\Http\Controllers\Api\MessageController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Broadcast;
@@ -453,6 +454,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/conversations/{conversation}/events', [ConversationLinkController::class, 'storeEvent']);
         // Chat del evento (obtener o crear). Va aquí para que herede permission:chat.use.
         Route::get('/events/{event}/conversation',          [ConversationLinkController::class, 'forEvent']);
+
+        // Push (fase 2): alta/baja del token del dispositivo.
+        Route::post('/device-tokens',   [DeviceTokenController::class, 'store']);
+        Route::delete('/device-tokens', [DeviceTokenController::class, 'destroy']);
 
         Route::get('/conversations/{conversation}/messages',  [MessageController::class, 'index']);
         Route::post('/conversations/{conversation}/messages', [MessageController::class, 'store']);
