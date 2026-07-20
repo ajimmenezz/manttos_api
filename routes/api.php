@@ -456,6 +456,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/conversations/{conversation}/events', [ConversationLinkController::class, 'storeEvent']);
         // Chat del evento (obtener o crear). Va aquí para que herede permission:chat.use.
         Route::get('/events/{event}/conversation',          [ConversationLinkController::class, 'forEvent']);
+        Route::get('/maintenances/{maintenance}/conversation', [ConversationLinkController::class, 'forMaintenance']);
 
         // Push (fase 2): alta/baja del token del dispositivo.
         Route::post('/device-tokens',   [DeviceTokenController::class, 'store']);

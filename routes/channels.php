@@ -23,3 +23,22 @@ Broadcast::channel('conversation.{conversationId}', function (User $user, int $c
 Broadcast::channel('user.{userId}', function (User $user, int $userId) {
     return $user->id === $userId;
 });
+
+/*
+ * Presencia: quién está conectado ahora mismo.
+ *
+ * Es un canal ÚNICO y global, no uno por conversación: lo que la interfaz necesita
+ * es "¿esta persona está en línea?", y con un canal por conversación habría que
+ * suscribirse a todas para saberlo.
+ *
+ * Devolver un arreglo (en vez de true) es lo que lo convierte en canal de presencia;
+ * ese arreglo es lo ÚNICO que ven los demás miembros, así que aquí no va nada
+ * sensible: solo id y nombre, que ya se ven en el directorio del chat.
+ */
+Broadcast::channel('chat-presence', function (User $user) {
+    if (! $user->can('chat.use')) {
+        return null;
+    }
+
+    return ['id' => $user->id, 'name' => $user->name];
+});

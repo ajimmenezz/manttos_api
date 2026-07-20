@@ -136,11 +136,58 @@ class ConversationLinkController extends Controller
     public function forEvent(Request $request, Event $event): JsonResponse
     {
         $user = $request->user();
-        abort_unless($user->can('chat.use'), 403, 'No tienes acceso al chat.');
         abort_unless($user->can('events.view'), 403, 'No tienes acceso a este evento.');
 
-        $existing = ConversationLink::where('linkable_type', 'event')
-            ->where('linkable_id', $event->id)
+        return $this->conversationFor(
+            $user,
+            'event',
+            $event->id,
+            'Evento ' . ($event->folio ?? $event->id),
+            collect([$event->creator, $event->assignee]),
+        );
+    }
+
+    /**
+     * Conversación del mantenimiento. Mismo contrato que la del evento; los
+     * involucrados aquí son quien lo creó y los ingenieros asignados.
+     */
+    public function forMaintenance(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user->can('maintenances.view'), 403, 'No tienes acceso a este mantenimiento.');
+
+        $maintenance->loadMissing(['site', 'system', 'engineers', 'creator']);
+
+        $nombre = 'Mantenimiento '
+            . ($maintenance->site?->name ? $maintenance->site->name . ' · ' : '')
+            . ($maintenance->system?->label ?? '#' . $maintenance->id);
+
+        return $this->conversationFor(
+            $user,
+            'maintenance',
+            $maintenance->id,
+            mb_strimwidth($nombre, 0, 150, '…'),
+            collect([$maintenance->creator])->merge($maintenance->engineers),
+        );
+    }
+
+    /**
+     * Obtiene o crea la conversación ligada a un objeto de la operación.
+     *
+     * @param  \Illuminate\Support\Collection<int,User|null>  $involved  gente ya
+     *         relacionada con el objeto; se filtra por ChatScope antes de meterla.
+     */
+    private function conversationFor(
+        User $user,
+        string $type,
+        int $id,
+        string $nombre,
+        $involved,
+    ): JsonResponse {
+        abort_unless($user->can('chat.use'), 403, 'No tienes acceso al chat.');
+
+        $existing = ConversationLink::where('linkable_type', $type)
+            ->where('linkable_id', $id)
             ->with('conversation')
             ->first();
 
@@ -158,24 +205,24 @@ class ConversationLinkController extends Controller
 
         // Participantes iniciales: solo los que REALMENTE pueden conversar con quien
         // abre (ChatScope), para no colar a alguien de otro cliente por la puerta de atrás.
-        $candidates = collect([$user, $event->creator, $event->assignee])
+        $candidates = collect([$user])->merge($involved)
             ->filter()
             ->unique('id')
             ->filter(fn (User $u) => $u->id === $user->id || ChatScope::canContact($user, $u))
             ->values();
 
-        $conversation = DB::transaction(function () use ($event, $user, $candidates) {
+        $conversation = DB::transaction(function () use ($user, $candidates, $type, $id, $nombre) {
             $clientId = ChatScope::resolveConversationClient($candidates);
 
             $conversation = Conversation::create([
                 'type'       => 'group',
-                'name'       => 'Evento ' . ($event->folio ?? $event->id),
+                'name'       => $nombre,
                 'created_by' => $user->id,
                 'client_id'  => $clientId === false ? null : $clientId,
             ]);
 
             $this->chat->ensureActiveParticipants($conversation, $candidates, adminIds: [$user->id]);
-            $this->link($conversation, 'event', $event->id, $user);
+            $this->link($conversation, $type, $id, $user);
 
             return $conversation;
         });
@@ -226,7 +273,8 @@ class ConversationLinkController extends Controller
                 'ref_id' => $link->linkable_id,
                 'label' => match (true) {
                     $target instanceof Event       => 'Evento ' . ($target->folio ?? $target->id),
-                    $target instanceof Maintenance => 'Mantenimiento #' . $target->id,
+                    $target instanceof Maintenance => 'Mantenimiento '
+                        . ($target->site?->name ?? '#' . $target->id),
                     $target instanceof Site        => $target->name,
                     default                        => 'Elemento eliminado',
                 },
