@@ -270,10 +270,9 @@ class ChatService
 
         broadcast(new MessageSent($message, $this->recipientIds($conversation, $sender->id)))->toOthers();
 
-        // Push a quien no lo esté viendo. Va con retraso a propósito: le da tiempo al
-        // acuse de lectura del WebSocket, y así no se notifica lo que ya se leyó.
-        SendChatPush::dispatch($message->id)
-            ->delay(now()->addSeconds(SendChatPush::READ_GRACE_SECONDS));
+        // Push a los destinatarios (el móvil decide si lo silencia por tenerlo abierto).
+        // Sin retraso: ya no dependemos de la marca de lectura, así que llega cuanto antes.
+        SendChatPush::dispatch($message->id);
 
         return $message;
     }

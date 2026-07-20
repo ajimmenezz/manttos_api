@@ -13,11 +13,10 @@ use Illuminate\Foundation\Queue\Queueable;
  * Push de un mensaje de chat (fase 2). El envío en sí lo hace PushSender (FCM en
  * Android, APNs en iOS); aquí solo se decide A QUIÉN se le avisa.
  *
- * Regla clave: NO se avisa a quien ya vio el mensaje. En vez de inventar un sistema
- * de presencia, se aprovecha la marca de agua que el chat ya lleva: el job se despacha
- * con unos segundos de retraso y, al ejecutarse, salta a los participantes cuyo
- * `last_read_message_id` ya alcanzó este mensaje (o sea, lo tenían abierto y el
- * WebSocket ya se los mostró). Así el push solo llega a quien de verdad no lo vio.
+ * Regla: se avisa a todos los participantes activos menos el emisor y los que tengan
+ * la conversación silenciada. NO se filtra por marca de lectura (esa es por usuario, no
+ * por dispositivo; leer en la web no debe apagar el push del celular). Es el propio
+ * móvil el que calla el aviso si tiene esa conversación abierta en primer plano.
  *
  * A diferencia de los eventos de broadcast del chat, esto SÍ va encolado: tarda
  * (llamada a Google) y que se demore unos segundos no rompe nada.
@@ -25,9 +24,6 @@ use Illuminate\Foundation\Queue\Queueable;
 class SendChatPush implements ShouldQueue
 {
     use Queueable;
-
-    /** Margen para que el acuse de lectura del WebSocket llegue antes que el push. */
-    public const READ_GRACE_SECONDS = 5;
 
     public int $tries = 3;
 
@@ -50,15 +46,19 @@ class SendChatPush implements ShouldQueue
 
         $conversation = $message->conversation;
 
+        // A quién se le avisa: todos los participantes activos menos el emisor y los
+        // que tengan la conversación silenciada.
+        //
+        // NO se filtra por marca de lectura a propósito. Esa marca es POR USUARIO, no
+        // por dispositivo: leer en la web la marcaba leída y el celular se quedaba sin
+        // aviso, aunque el teléfono estuviera guardado. El celular es otro dispositivo
+        // y debe avisar por su cuenta. Quien SÍ decide callar el aviso es el propio
+        // móvil: si en ese momento tiene abierta esa conversación, no muestra la
+        // notificación (lo ve en vivo). Así no hay doble aviso cuando de verdad se está
+        // mirando el chat en el teléfono, pero leer en la web ya no apaga el push.
         $recipients = ConversationParticipant::where('conversation_id', $conversation->id)
             ->whereNull('left_at')
             ->where('user_id', '!=', $message->sender_id)
-            // Ya lo leyó (lo tenía abierto): el WebSocket hizo el trabajo.
-            ->where(function ($q) use ($message) {
-                $q->whereNull('last_read_message_id')
-                  ->orWhere('last_read_message_id', '<', $message->id);
-            })
-            // Silenciada.
             ->where(function ($q) {
                 $q->whereNull('muted_until')->orWhere('muted_until', '<', now());
             })
