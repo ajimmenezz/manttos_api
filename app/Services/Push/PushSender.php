@@ -13,11 +13,12 @@ use App\Models\DeviceToken;
  * FCM HTTP v1 y iOS saldrá por APNs directo. El Job no tiene por qué enterarse: pide
  * "manda esto a estos tokens" y aquí se reparte por `provider`.
  *
- * @see FcmSender  implementación de Android (activa)
+ * @see FcmSender   Android
+ * @see ApnsSender  iOS
  */
 class PushSender
 {
-    public function __construct(private FcmSender $fcm)
+    public function __construct(private FcmSender $fcm, private ApnsSender $apns)
     {
     }
 
@@ -41,16 +42,21 @@ class PushSender
             ));
         }
 
-        // Pendiente: los tokens con provider 'apns' se quedan sin enviar a propósito
-        // hasta que exista ApnsSender. No se borran ni se marcan como error: en cuanto
-        // se conecte la llave .p8, empiezan a recibir sin necesidad de re-registrar.
+        if ($apnsTokens = $byProvider->get('apns')) {
+            $dead = array_merge($dead, $this->apns->send(
+                $apnsTokens->pluck('token')->all(), $title, $body, $data
+            ));
+        }
 
         return $dead;
     }
 
-    /** ¿Hay al menos un canal de envío configurado? Si no, el Job ni se molesta. */
+    /**
+     * ¿Hay al menos UN canal configurado? Si no, el Job ni se molesta. Basta con uno:
+     * tener solo Android listo no debe impedir que Android reciba.
+     */
     public function isConfigured(): bool
     {
-        return $this->fcm->isConfigured();
+        return $this->fcm->isConfigured() || $this->apns->isConfigured();
     }
 }
