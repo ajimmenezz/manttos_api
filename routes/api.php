@@ -53,6 +53,11 @@ use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SiteEngineerController;
 use App\Http\Controllers\Api\SiteUserController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\ConversationController;
+use App\Http\Controllers\Api\ConversationLinkController;
+use App\Http\Controllers\Api\MessageController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Route;
 
 // Configuración pública (sin auth — necesaria para login page y providers)
@@ -421,6 +426,38 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/notifications/unread-count',    [NotificationController::class, 'unreadCount']);
     Route::post('/notifications/read-all',       [NotificationController::class, 'markAllRead']);
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
+
+    // Chat interno (conversaciones 1-a-1 y grupos) — el alcance por cliente lo cuida ChatScope.
+    Route::middleware('permission:chat.use')->group(function () {
+        // Autorización de canales privados de Reverb. Va aquí (y no en bootstrap/app.php)
+        // para que use el guard sanctum del API en vez del guard web.
+        Route::post('/broadcasting/auth', fn (Request $request) => Broadcast::auth($request));
+
+        // Estáticas ANTES de /conversations/{conversation} para que no las coma el binding.
+        Route::get('/conversations/contacts',     [ConversationController::class, 'contacts']);
+        Route::get('/conversations/unread-count', [ConversationController::class, 'unreadTotal']);
+
+        Route::get('/conversations',                [ConversationController::class, 'index']);
+        Route::post('/conversations',               [ConversationController::class, 'store']);
+        Route::get('/conversations/{conversation}', [ConversationController::class, 'show']);
+        Route::patch('/conversations/{conversation}', [ConversationController::class, 'update']);
+        Route::post('/conversations/{conversation}/participants', [ConversationController::class, 'addParticipants']);
+        Route::delete('/conversations/{conversation}/participants/{userId}', [ConversationController::class, 'removeParticipant']);
+        Route::post('/conversations/{conversation}/read',   [ConversationController::class, 'read']);
+        Route::post('/conversations/{conversation}/typing', [ConversationController::class, 'typing']);
+
+        // Fase 3 — integración bidireccional con la operación.
+        Route::get('/conversations/{conversation}/links',   [ConversationLinkController::class, 'index']);
+        Route::post('/conversations/{conversation}/link',   [ConversationLinkController::class, 'store']);
+        Route::delete('/conversations/{conversation}/links/{link}', [ConversationLinkController::class, 'destroy']);
+        Route::post('/conversations/{conversation}/events', [ConversationLinkController::class, 'storeEvent']);
+        // Chat del evento (obtener o crear). Va aquí para que herede permission:chat.use.
+        Route::get('/events/{event}/conversation',          [ConversationLinkController::class, 'forEvent']);
+
+        Route::get('/conversations/{conversation}/messages',  [MessageController::class, 'index']);
+        Route::post('/conversations/{conversation}/messages', [MessageController::class, 'store']);
+        Route::delete('/messages/{message}',                  [MessageController::class, 'destroy']);
+    });
 
     // Vista consolidada de mantenimientos (scope por rol)
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);

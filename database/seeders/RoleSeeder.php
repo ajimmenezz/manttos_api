@@ -39,6 +39,7 @@ class RoleSeeder extends Seeder
             'maintenances.view', 'maintenances.create',
             'events.view', 'events.create', 'events.comment', 'events.assign',
             'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
+            'chat.use', 'chat.group-manage',
         ]);
 
         // Admin de sitio: gestiona su(s) sitio(s): directorios, dispositivos y planos.
@@ -55,6 +56,7 @@ class RoleSeeder extends Seeder
             'maintenances.view', 'maintenances.create',
             'events.view', 'events.create', 'events.comment', 'events.assign',
             'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
+            'chat.use', 'chat.group-manage',
         ]);
 
         // Solicitante: usuario de portal / autoservicio. Solo levanta y da seguimiento
@@ -64,6 +66,7 @@ class RoleSeeder extends Seeder
         $solicitante->syncPermissions([
             'profile.view', 'profile.edit',
             'events.view', 'events.create', 'events.comment',
+            'chat.use',
         ]);
 
         // Ingeniero: ejecuta mantenimientos asignados, registra actividades y programa
@@ -74,12 +77,14 @@ class RoleSeeder extends Seeder
             'floor-plans.view',
             'maintenances.view', 'maintenances.record-activity', 'maintenances.schedule-devices',
             'events.view', 'events.create', 'events.fill-form', 'events.change-status', 'events.comment',
+            'chat.use', 'chat.group-manage',
         ]);
 
         // Técnico: acceso mínimo (perfil propio). Se le otorgan permisos desde la UI.
         $tecnico = Role::firstOrCreate(['name' => 'tecnico', 'guard_name' => 'web']);
         $tecnico->syncPermissions([
             'profile.view', 'profile.edit',
+            'chat.use',
         ]);
 
         // Admin: todos los permisos excepto config.manage (superadmin) y los *.archive

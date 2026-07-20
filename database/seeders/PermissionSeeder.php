@@ -115,6 +115,11 @@ class PermissionSeeder extends Seeder
         'channels.manage',             // alta y configuración de líneas de mensajería + agente
         'knowledge.manage',            // base de conocimiento de soporte (RAG por sistema) del agente
 
+        // ── Chat interno (comunicación entre usuarios) ──────────────
+        'chat.use',                    // participar: conversar 1-a-1 y en los grupos donde esté
+        'chat.group-manage',           // crear grupos y administrarlos (renombrar, agregar/quitar)
+        'chat.all-conversations',      // soporte/auditoría: leer cualquier hilo (NO escribir en él)
+
         // ── Solicitantes (usuarios de portal / autoservicio) ────────
         'solicitantes.view',           // ver el directorio de solicitantes (con alcance)
         'solicitantes.create',         // dar de alta solicitantes (incl. importación masiva)

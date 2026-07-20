@@ -10,6 +10,9 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
+        // Canales privados del chat. La ruta de autorización NO se registra aquí
+        // (usaría el guard web): va en routes/api.php bajo auth:sanctum.
+        channels: __DIR__.'/../routes/channels.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
