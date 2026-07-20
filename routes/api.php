@@ -446,6 +446,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/conversations/{conversation}/participants/{userId}', [ConversationController::class, 'removeParticipant']);
         Route::post('/conversations/{conversation}/read',   [ConversationController::class, 'read']);
         Route::post('/conversations/{conversation}/typing', [ConversationController::class, 'typing']);
+        Route::post('/conversations/{conversation}/mute',   [ConversationController::class, 'mute']);
+        Route::delete('/conversations/{conversation}/mute', [ConversationController::class, 'unmute']);
 
         // Fase 3 — integración bidireccional con la operación.
         Route::get('/conversations/{conversation}/links',   [ConversationLinkController::class, 'index']);

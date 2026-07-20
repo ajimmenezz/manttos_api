@@ -183,6 +183,44 @@ class ConversationController extends Controller
         return response()->json(['last_read_message_id' => $last]);
     }
 
+    /**
+     * Silencia la conversación para MÍ (no para los demás): deja de mandarme push,
+     * pero los mensajes siguen llegando y contando como no leídos.
+     *
+     * `hours` nulo = indefinido. Se guarda como una fecha muy lejana en vez de un
+     * booleano aparte, para que `SendChatPush` siga con una sola comparación de fecha
+     * y el silencio temporal se venza solo, sin ninguna tarea que lo limpie.
+     */
+    public function mute(Request $request, Conversation $conversation): JsonResponse
+    {
+        $user = $this->authorizeParticipant($request, $conversation);
+
+        $data = $request->validate([
+            'hours' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:8760'],
+        ]);
+
+        $until = isset($data['hours']) && $data['hours']
+            ? now()->addHours((int) $data['hours'])
+            : now()->addYears(100);
+
+        $conversation->participantFor($user->id)?->update(['muted_until' => $until]);
+
+        return response()->json([
+            'message'     => 'Conversación silenciada.',
+            'muted_until' => $until->toISOString(),
+        ]);
+    }
+
+    /** Reactiva los avisos. */
+    public function unmute(Request $request, Conversation $conversation): JsonResponse
+    {
+        $user = $this->authorizeParticipant($request, $conversation);
+
+        $conversation->participantFor($user->id)?->update(['muted_until' => null]);
+
+        return response()->json(['message' => 'Avisos reactivados.', 'muted_until' => null]);
+    }
+
     /** "Está escribiendo…": solo broadcast, no se guarda nada. */
     public function typing(Request $request, Conversation $conversation): JsonResponse
     {
@@ -277,6 +315,9 @@ class ConversationController extends Controller
             'last_message_at' => $conversation->last_message_at?->toISOString(),
             'unread_count'    => $this->chat->unreadCount($conversation, $user->id, $participant),
             'my_role'         => $participant?->role,
+            // Solo el estado, no la fecha exacta: a la UI le basta con el interruptor.
+            'muted'           => (bool) ($participant?->muted_until && $participant->muted_until->isFuture()),
+            'muted_until'     => $participant?->muted_until?->toISOString(),
             'last_message'    => $last ? [
                 'id'          => $last->id,
                 'body'        => $last->trashed() ? null : $last->body,
