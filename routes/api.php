@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\UserPreferenceController;
 use App\Http\Controllers\Api\EventStatusController;
 use App\Http\Controllers\Api\EventSlaController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\NotificationPreferenceController;
 use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\WorkCalendarController;
@@ -427,6 +428,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/notifications/unread-count',    [NotificationController::class, 'unreadCount']);
     Route::post('/notifications/read-all',       [NotificationController::class, 'markAllRead']);
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
+
+    // Preferencias de notificación por usuario (qué escenarios recibir).
+    Route::get('/me/notification-preferences',  [NotificationPreferenceController::class, 'index']);
+    Route::put('/me/notification-preferences',  [NotificationPreferenceController::class, 'update']);
 
     // Chat interno (conversaciones 1-a-1 y grupos) — el alcance por cliente lo cuida ChatScope.
     Route::middleware('permission:chat.use')->group(function () {

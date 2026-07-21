@@ -5,7 +5,9 @@ namespace App\Jobs;
 use App\Models\ConversationParticipant;
 use App\Models\DeviceToken;
 use App\Models\Message;
+use App\Models\NotificationPreference;
 use App\Services\Push\PushSender;
+use App\Support\NotificationType;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
@@ -66,6 +68,16 @@ class SendChatPush implements ShouldQueue
 
         if ($recipients->isEmpty()) {
             return;
+        }
+
+        // Preferencia global de "Mensajes de chat": quien la apagó no recibe push (el
+        // silenciado por-conversación de arriba es aparte y más fino).
+        $optedOut = NotificationPreference::optedOut($recipients->all(), NotificationType::CHAT_MESSAGE);
+        if ($optedOut->isNotEmpty()) {
+            $recipients = $recipients->reject(fn ($id) => $optedOut->contains($id))->values();
+            if ($recipients->isEmpty()) {
+                return;
+            }
         }
 
         $tokens = DeviceToken::whereIn('user_id', $recipients)->get();

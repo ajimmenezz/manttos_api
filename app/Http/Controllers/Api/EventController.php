@@ -14,15 +14,18 @@ use App\Models\EventStatusHistory;
 use App\Models\EventType;
 use App\Models\EventTypeField;
 use App\Models\EventTypeTransition;
-use App\Models\Notification;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Notifications\Notifier;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use App\Support\EventAudience;
 use App\Support\EventFolio;
 use App\Support\EventSla;
+use App\Support\NotificationType;
 
 class EventController extends Controller
 {
@@ -164,6 +167,22 @@ class EventController extends Controller
 
             return $event;
         });
+
+        // Aviso (bandeja + push) a quienes les toca el evento, menos el creador.
+        app(Notifier::class)->send(
+            EventAudience::interested($event),
+            NotificationType::EVENT_CREATED,
+            [
+                'event_id'   => $event->id,
+                'folio'      => $event->folio,
+                'site'       => $site->name,
+                'actor_id'   => $user->id,
+                'actor_name' => $user->name,
+            ],
+            "Nuevo evento {$event->folio}",
+            Str::limit(trim($event->description), 120),
+            $user->id,
+        );
 
         return response()->json(['message' => 'Evento creado.', 'event' => $event->fresh(), 'folio' => $event->folio], 201);
     }
@@ -422,6 +441,24 @@ class EventController extends Controller
             ]);
         });
 
+        // Aviso a interesados + el creador (aunque no esté en el audience), menos quien lo movió.
+        $actor = $request->user();
+        $statusLabel = $target?->label ?? 'nuevo estado';
+        app(Notifier::class)->send(
+            array_merge(EventAudience::interested($event), array_filter([$event->created_by])),
+            NotificationType::EVENT_STATUS_CHANGED,
+            [
+                'event_id'   => $event->id,
+                'folio'      => $event->folio,
+                'status'     => $statusLabel,
+                'actor_id'   => $actor->id,
+                'actor_name' => $actor->name,
+            ],
+            "Evento {$event->folio}: {$statusLabel}",
+            "{$actor->name} cambió el estado a «{$statusLabel}».",
+            $actor->id,
+        );
+
         return response()->json(['message' => 'Estado actualizado.', 'event' => $event->fresh(['status'])]);
     }
 
@@ -465,16 +502,24 @@ class EventController extends Controller
                 'note'           => $assignee ? "Asignado a {$assignee->name}" : 'Asignación retirada (regresa al pool)',
                 'created_at'     => now(),
             ]);
+        });
 
-            if ($assignee && $assignee->id !== $request->user()->id) {
-                Notification::createFor($assignee->id, 'event_assigned', [
+        // Aviso (bandeja + push) al ingeniero asignado, salvo que se asigne a sí mismo.
+        if ($assignee && $assignee->id !== $request->user()->id) {
+            app(Notifier::class)->send(
+                [$assignee->id],
+                NotificationType::EVENT_ASSIGNED,
+                [
                     'event_id'   => $event->id,
                     'folio'      => $event->folio,
                     'actor_id'   => $request->user()->id,
                     'actor_name' => $request->user()->name,
-                ]);
-            }
-        });
+                ],
+                "Te asignaron el evento {$event->folio}",
+                "{$request->user()->name} te asignó este evento.",
+                $request->user()->id,
+            );
+        }
 
         return response()->json([
             'message' => $assignee ? "Evento asignado a {$assignee->name}." : 'Asignación retirada; el evento vuelve al pool.',

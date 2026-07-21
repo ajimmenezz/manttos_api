@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ScopesEvents;
 use App\Models\Event;
 use App\Models\EventComment;
-use App\Models\Notification;
 use App\Models\User;
+use App\Services\Notifications\Notifier;
+use App\Support\EventAudience;
+use App\Support\NotificationType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -66,7 +68,7 @@ class EventCommentController extends Controller
         $author = $request->user();
         $mentionable = $this->mentionableUsers($event)->keyBy('id');
 
-        $comment = DB::transaction(function () use ($event, $author, $data, $parent, $mentionable) {
+        [$comment, $mentionIds] = DB::transaction(function () use ($event, $author, $data, $parent, $mentionable) {
             $comment = EventComment::create([
                 'event_id'  => $event->id,
                 'user_id'   => $author->id,
@@ -82,10 +84,12 @@ class EventCommentController extends Controller
                 $comment->mentionedUsers()->sync($mentionIds->all());
             }
 
-            $this->notify($event, $comment, $author, $mentionIds, $parent);
-
-            return $comment;
+            return [$comment, $mentionIds];
         });
+
+        // Fuera de la transacción: notificar (bandeja + push) no debe correr con datos
+        // sin confirmar ni encolar el job antes del commit.
+        $this->notify($event, $comment, $author, $mentionIds, $parent);
 
         $comment->load(['user:id,name', 'mentionedUsers:id,name']);
         return response()->json(['message' => 'Comentario agregado.', 'comment' => $this->serialize($comment, $request)], 201);
@@ -143,25 +147,8 @@ class EventCommentController extends Controller
     /** Usuarios activos que pueden ver/atender el evento (candidatos a @mención). */
     private function mentionableUsers(Event $event)
     {
-        // Solo roles que EXISTAN y NO estén archivados: el scope role() de Spatie usa
-        // App\Models\Role (con SoftDeletes) y lanza RoleDoesNotExist si el rol no está o
-        // fue archivado (p. ej. `admin`). El whereNull('deleted_at') lo excluye.
-        $adminRoles = DB::table('roles')
-            ->whereIn('name', ['superadmin', 'admin'])
-            ->where('guard_name', 'web')
-            ->whereNull('deleted_at')
-            ->pluck('name')->all();
-
-        $ids = collect()
-            ->merge($adminRoles ? User::role($adminRoles)->pluck('id') : [])
-            ->merge(DB::table('client_user')->where('client_id', $event->client_id)->pluck('user_id'))
-            ->merge(DB::table('site_user')->where('site_id', $event->site_id)->pluck('user_id'))
-            ->merge(DB::table('client_engineers')->where('client_id', $event->client_id)->pluck('user_id'))
-            ->merge(DB::table('site_engineers')->where('site_id', $event->site_id)->pluck('user_id'))
-            ->unique()->values();
-
-        return User::whereIn('id', $ids)->where('is_active', true)
-            ->orderBy('name')->get(['id', 'name', 'email']);
+        // Mismo conjunto que "a quién le importa el evento": centralizado en EventAudience.
+        return EventAudience::interestedUsers($event);
     }
 
     /** IDs de usuario referenciados en el cuerpo con el formato `@[Nombre](123)`. */
@@ -177,25 +164,43 @@ class EventCommentController extends Controller
         return preg_replace('/@\[([^\]]+)\]\(\d+\)/', '@$1', $body);
     }
 
-    /** Genera notificaciones in-app: a los mencionados y al autor del comentario padre. */
+    /**
+     * Notifica (bandeja + push) por un comentario nuevo, sin duplicar avisos a la misma
+     * persona. Prioridad: mención > respuesta a tu comentario > comentario en tu evento.
+     */
     private function notify(Event $event, EventComment $comment, User $author, $mentionIds, ?EventComment $parent): void
     {
+        $snippet = Str::limit(trim($this->plainBody($comment->body)), 140);
         $payload = [
             'event_id'   => $event->id,
             'folio'      => $event->folio,
             'comment_id' => $comment->id,
             'actor_id'   => $author->id,
             'actor_name' => $author->name,
-            'snippet'    => Str::limit(trim($this->plainBody($comment->body)), 140),
+            'snippet'    => $snippet,
         ];
 
-        foreach ($mentionIds as $uid) {
-            Notification::createFor($uid, 'event_mention', $payload);
+        $notifier = app(Notifier::class);
+        $notified = collect();       // a quién ya se avisó (para no repetir por otra vía)
+
+        // 1) Menciones (@): al mencionado.
+        if ($mentionIds->isNotEmpty()) {
+            $notifier->send($mentionIds->all(), NotificationType::EVENT_MENTION, $payload,
+                "Te mencionaron en {$event->folio}", "{$author->name}: {$snippet}", $author->id);
+            $notified = $notified->merge($mentionIds->all());
         }
 
-        // Respuesta: avisa al autor del comentario padre (si no es el mismo ni ya fue mencionado).
-        if ($parent && $parent->user_id !== $author->id && ! $mentionIds->contains($parent->user_id)) {
-            Notification::createFor($parent->user_id, 'event_reply', $payload);
+        // 2) Respuesta: al autor del comentario padre (si no fue ya mencionado).
+        if ($parent && $parent->user_id !== $author->id && ! $notified->contains($parent->user_id)) {
+            $notifier->send([$parent->user_id], NotificationType::EVENT_REPLY, $payload,
+                "Respondieron tu comentario en {$event->folio}", "{$author->name}: {$snippet}", $author->id);
+            $notified->push($parent->user_id);
+        }
+
+        // 3) Comentario en tu evento: al creador del evento (si no se avisó ya por 1/2).
+        if ($event->created_by && $event->created_by !== $author->id && ! $notified->contains($event->created_by)) {
+            $notifier->send([$event->created_by], NotificationType::EVENT_COMMENT, $payload,
+                "Nuevo comentario en {$event->folio}", "{$author->name}: {$snippet}", $author->id);
         }
     }
 

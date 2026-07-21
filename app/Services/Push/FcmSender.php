@@ -3,6 +3,7 @@
 namespace App\Services\Push;
 
 use Illuminate\Support\Facades\Log;
+use Kreait\Firebase\Messaging\AndroidConfig;
 use Kreait\Firebase\Messaging\CloudMessage;
 use Kreait\Firebase\Messaging\Notification as FcmNotification;
 
@@ -32,9 +33,17 @@ class FcmSender
             return [];
         }
 
+        // Canal Android por categoría: el usuario controla sonido/importancia de "Chat"
+        // y "Eventos" por separado desde Ajustes del sistema. Si el canal no existe en el
+        // dispositivo, Android usa el default (no falla). El chat es el único type de chat.
+        $channel = ($data['type'] ?? null) === 'chat_message' ? 'chat' : 'events';
+
         $message = CloudMessage::new()
             ->withNotification(FcmNotification::create($title, mb_strimwidth($body, 0, 180, '…')))
-            ->withData($data);
+            ->withData($data)
+            ->withAndroidConfig(AndroidConfig::fromArray([
+                'notification' => ['channel_id' => $channel],
+            ]));
 
         try {
             // FCM acepta máximo 500 destinatarios por multicast.
