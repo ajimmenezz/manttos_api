@@ -144,6 +144,8 @@ class PermissionSeeder extends Seeder
 
         // ── Documentación ───────────────────────────────────────────
         'manuals.view',                 // guías completas web/móvil
+        'webhooks.view',                // ver webhooks salientes de su alcance
+        'webhooks.manage',              // crear/editar/eliminar/probar webhooks
     ];
 
     public function run(): void

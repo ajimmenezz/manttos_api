@@ -8,8 +8,10 @@ use App\Models\Event;
 use App\Models\EventComment;
 use App\Models\User;
 use App\Services\Notifications\Notifier;
+use App\Services\Webhooks\WebhookDispatcher;
 use App\Support\EventAudience;
 use App\Support\NotificationType;
+use App\Support\WebhookEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -90,6 +92,21 @@ class EventCommentController extends Controller
         // Fuera de la transacción: notificar (bandeja + push) no debe correr con datos
         // sin confirmar ni encolar el job antes del commit.
         $this->notify($event, $comment, $author, $mentionIds, $parent);
+
+        // Webhook saliente con el comentario.
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::EVENT_COMMENT_ADDED,
+            $event->client_id,
+            $event->site_id,
+            WebhookEvent::eventData($event, $author, [
+                'comment' => [
+                    'id'      => $comment->id,
+                    'body'    => $this->plainBody($comment->body),
+                    'author'  => ['id' => $author->id, 'name' => $author->name],
+                    'created_at' => $comment->created_at?->toISOString(),
+                ],
+            ]),
+        );
 
         $comment->load(['user:id,name', 'mentionedUsers:id,name']);
         return response()->json(['message' => 'Comentario agregado.', 'comment' => $this->serialize($comment, $request)], 201);

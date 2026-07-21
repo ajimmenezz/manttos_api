@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\AppChatController;
 use App\Http\Controllers\Api\TelegramWebhookController;
 use App\Http\Controllers\Api\WhatsAppWebhookController;
 use App\Http\Controllers\Api\DeveloperTokenController;
+use App\Http\Controllers\Api\WebhookEndpointController;
 use App\Http\Middleware\RequireWriteScope;
 use App\Http\Controllers\Api\McpController;
 use App\Http\Controllers\Api\MaintenanceActionPlanController;
@@ -187,6 +188,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/developer/tokens',         [DeveloperTokenController::class, 'index']);
     Route::post('/developer/tokens',        [DeveloperTokenController::class, 'store']);
     Route::delete('/developer/tokens/{id}', [DeveloperTokenController::class, 'destroy']);
+
+    // Webhooks salientes (por cliente/sitio). El alcance lo cuida el controlador.
+    Route::get('/developer/webhooks/options',            [WebhookEndpointController::class, 'options']);
+    Route::get('/developer/webhooks',                    [WebhookEndpointController::class, 'index']);
+    Route::post('/developer/webhooks',                   [WebhookEndpointController::class, 'store']);
+    Route::get('/developer/webhooks/{webhook}',          [WebhookEndpointController::class, 'show']);
+    Route::patch('/developer/webhooks/{webhook}',        [WebhookEndpointController::class, 'update']);
+    Route::delete('/developer/webhooks/{webhook}',       [WebhookEndpointController::class, 'destroy']);
+    Route::post('/developer/webhooks/{webhook}/regenerate-secret', [WebhookEndpointController::class, 'regenerateSecret']);
+    Route::post('/developer/webhooks/{webhook}/test',    [WebhookEndpointController::class, 'test']);
+    Route::get('/developer/webhooks/{webhook}/deliveries', [WebhookEndpointController::class, 'deliveries']);
 
     // Permisos
     Route::get('/permissions', [PermissionController::class, 'index']);

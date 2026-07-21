@@ -17,6 +17,7 @@ use App\Models\EventTypeTransition;
 use App\Models\Site;
 use App\Models\User;
 use App\Services\Notifications\Notifier;
+use App\Services\Webhooks\WebhookDispatcher;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +27,7 @@ use App\Support\EventAudience;
 use App\Support\EventFolio;
 use App\Support\EventSla;
 use App\Support\NotificationType;
+use App\Support\WebhookEvent;
 
 class EventController extends Controller
 {
@@ -182,6 +184,14 @@ class EventController extends Controller
             "Nuevo evento {$event->folio}",
             Str::limit(trim($event->description), 120),
             $user->id,
+        );
+
+        // Webhook saliente a los sistemas suscritos del cliente/sitio.
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::EVENT_CREATED,
+            $event->client_id,
+            $event->site_id,
+            WebhookEvent::eventData($event, $user),
         );
 
         return response()->json(['message' => 'Evento creado.', 'event' => $event->fresh(), 'folio' => $event->folio], 201);
@@ -432,6 +442,9 @@ class EventController extends Controller
                 "Para pasar a «{$target->label}» debes escribir una nota.");
         }
 
+        // Estado anterior (para el payload del webhook), antes de moverlo.
+        $fromStatus = EventStatus::find($event->status_id);
+
         DB::transaction(function () use ($event, $data, $request) {
             $from = $event->status_id;
             $event->update(['status_id' => $data['to_status_id']]);
@@ -457,6 +470,16 @@ class EventController extends Controller
             "Evento {$event->folio}: {$statusLabel}",
             "{$actor->name} cambió el estado a «{$statusLabel}».",
             $actor->id,
+        );
+
+        // Webhook saliente con el estado anterior y el nuevo.
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::EVENT_STATUS_CHANGED,
+            $event->client_id,
+            $event->site_id,
+            WebhookEvent::eventData($event->fresh(), $actor, [
+                'previous_status' => $fromStatus ? ['key' => $fromStatus->key, 'label' => $fromStatus->label] : null,
+            ]),
         );
 
         return response()->json(['message' => 'Estado actualizado.', 'event' => $event->fresh(['status'])]);
@@ -520,6 +543,14 @@ class EventController extends Controller
                 $request->user()->id,
             );
         }
+
+        // Webhook saliente (asignado o retirado del pool: assigned_to puede ser null).
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::EVENT_ASSIGNED,
+            $event->client_id,
+            $event->site_id,
+            WebhookEvent::eventData($event->fresh(), $request->user()),
+        );
 
         return response()->json([
             'message' => $assignee ? "Evento asignado a {$assignee->name}." : 'Asignación retirada; el evento vuelve al pool.',

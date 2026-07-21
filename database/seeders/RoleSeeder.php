@@ -40,6 +40,7 @@ class RoleSeeder extends Seeder
             'events.view', 'events.create', 'events.comment', 'events.assign',
             'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
             'chat.use', 'chat.group-manage',
+            'webhooks.view', 'webhooks.manage',
         ]);
 
         // Admin de sitio: gestiona su(s) sitio(s): directorios, dispositivos y planos.
@@ -57,6 +58,7 @@ class RoleSeeder extends Seeder
             'events.view', 'events.create', 'events.comment', 'events.assign',
             'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
             'chat.use', 'chat.group-manage',
+            'webhooks.view', 'webhooks.manage',
         ]);
 
         // Solicitante: usuario de portal / autoservicio. Solo levanta y da seguimiento
