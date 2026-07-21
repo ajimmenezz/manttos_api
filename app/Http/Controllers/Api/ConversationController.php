@@ -221,6 +221,23 @@ class ConversationController extends Controller
         return response()->json(['message' => 'Avisos reactivados.', 'muted_until' => null]);
     }
 
+    /**
+     * Vacía la conversación para MÍ (no para los demás): a partir de ahora solo veo lo
+     * nuevo. No borra mensajes; es una marca de agua por participante. Devuelve el id
+     * hasta el que se vació para que el cliente limpie su caché local.
+     */
+    public function clear(Request $request, Conversation $conversation): JsonResponse
+    {
+        $user = $this->authorizeParticipant($request, $conversation);
+
+        $cleared = $this->chat->clearConversation($conversation, $user);
+
+        return response()->json([
+            'message'                   => 'Conversación vaciada.',
+            'cleared_before_message_id' => $cleared,
+        ]);
+    }
+
     /** "Está escribiendo…": solo broadcast, no se guarda nada. */
     public function typing(Request $request, Conversation $conversation): JsonResponse
     {
@@ -301,7 +318,12 @@ class ConversationController extends Controller
     ): array {
         $participant ??= $conversation->participantFor($user->id);
         $others       = $conversation->activeUsers()->where('users.id', '!=', $user->id)->get();
-        $last         = $conversation->messages()->with('sender:id,name')->latest('id')->first();
+        // El preview respeta el vaciado por-usuario: no muestra algo ya vaciado.
+        $lastQuery    = $conversation->messages()->with('sender:id,name');
+        if ($participant?->cleared_before_message_id) {
+            $lastQuery->where('id', '>', (int) $participant->cleared_before_message_id);
+        }
+        $last         = $lastQuery->latest('id')->first();
 
         return [
             'id'   => $conversation->id,

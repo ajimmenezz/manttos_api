@@ -317,9 +317,34 @@ class ChatService
             return 0;
         }
 
+        // El piso es el MAYOR entre lectura y vaciado: lo vaciado no debe dejar
+        // "no-leídos fantasma" por debajo de la marca de agua de vaciado.
+        $floor = max((int) $participant->last_read_message_id, (int) $participant->cleared_before_message_id);
+
         return $conversation->messages()
-            ->where('id', '>', (int) $participant->last_read_message_id)
+            ->where('id', '>', $floor)
             ->where('sender_id', '!=', $userId)
             ->count();
+    }
+
+    /**
+     * "Vaciar conversación" para MÍ: fija la marca de agua de vaciado al último mensaje.
+     * A partir de ahí solo veo lo nuevo; no borra nada para los demás. Sube también la
+     * marca de lectura al mismo punto (no quedan no-leídos por debajo del vaciado).
+     * Devuelve el id hasta el que se vació (para que el cliente limpie su caché local).
+     */
+    public function clearConversation(Conversation $conversation, User $user): int
+    {
+        $participant = $conversation->participantFor($user->id);
+        abort_if($participant === null, 403, 'No participas en esta conversación.');
+
+        $lastId = (int) ($conversation->messages()->max('id') ?? 0);
+
+        $participant->update([
+            'cleared_before_message_id' => $lastId,
+            'last_read_message_id'      => max((int) $participant->last_read_message_id, $lastId),
+        ]);
+
+        return $lastId;
     }
 }

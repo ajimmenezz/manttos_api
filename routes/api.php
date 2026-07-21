@@ -453,6 +453,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/conversations/{conversation}/typing', [ConversationController::class, 'typing']);
         Route::post('/conversations/{conversation}/mute',   [ConversationController::class, 'mute']);
         Route::delete('/conversations/{conversation}/mute', [ConversationController::class, 'unmute']);
+        Route::post('/conversations/{conversation}/clear',  [ConversationController::class, 'clear']);
 
         // Fase 3 — integración bidireccional con la operación.
         Route::get('/conversations/{conversation}/links',   [ConversationLinkController::class, 'index']);
@@ -467,6 +468,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/device-tokens',   [DeviceTokenController::class, 'store']);
         Route::delete('/device-tokens', [DeviceTokenController::class, 'destroy']);
 
+        // Búsqueda de texto en el hilo. Ruta estática ANTES del index para no chocar.
+        Route::get('/conversations/{conversation}/messages/search', [MessageController::class, 'search']);
         Route::get('/conversations/{conversation}/messages',  [MessageController::class, 'index']);
         Route::post('/conversations/{conversation}/messages', [MessageController::class, 'store']);
         Route::delete('/messages/{message}',                  [MessageController::class, 'destroy']);

@@ -43,6 +43,12 @@ class MessageController extends Controller
             ->withTrashed()                       // el hueco "mensaje eliminado" se sigue viendo
             ->with(['sender:id,name', 'attachments', 'replyTo:id,body,sender_id']);
 
+        // Vaciado por-usuario: no se ve nada por debajo de su marca de agua de vaciado.
+        $cleared = (int) ($conversation->participantFor($user->id)?->cleared_before_message_id ?? 0);
+        if ($cleared > 0) {
+            $query->where('id', '>', $cleared);
+        }
+
         if (! empty($data['before'])) {
             $query->where('id', '<', $data['before']);
         }
@@ -60,6 +66,43 @@ class MessageController extends Controller
             'data'     => $messages->map(fn (Message $m) => $this->serialize($m)),
             'has_more' => $hasMore,
         ]);
+    }
+
+    /**
+     * Busca texto dentro de una conversación. Devuelve las coincidencias del más nuevo
+     * al más viejo; el cliente salta al mensaje anclando el hilo en su id. Respeta el
+     * vaciado por-usuario (no encuentra lo que ya vaciaste) y omite los eliminados.
+     */
+    public function search(Request $request, Conversation $conversation): JsonResponse
+    {
+        $user = $this->authorizeParticipant($request, $conversation);
+
+        $data = $request->validate([
+            'q' => ['required', 'string', 'min:2', 'max:100'],
+        ]);
+
+        $query = $conversation->messages()
+            ->whereNull('deleted_at')
+            ->whereNotNull('body')
+            ->where('body', 'ilike', '%' . $this->escapeLike(trim($data['q'])) . '%')
+            ->with(['sender:id,name', 'attachments', 'replyTo:id,body,sender_id']);
+
+        $cleared = (int) ($conversation->participantFor($user->id)?->cleared_before_message_id ?? 0);
+        if ($cleared > 0) {
+            $query->where('id', '>', $cleared);
+        }
+
+        $messages = $query->orderByDesc('id')->limit(50)->get();
+
+        return response()->json([
+            'data' => $messages->map(fn (Message $m) => $this->serialize($m)),
+        ]);
+    }
+
+    /** Escapa los comodines de LIKE para que el texto del usuario se busque literal. */
+    private function escapeLike(string $term): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term);
     }
 
     /** Envía un mensaje (texto y/o adjuntos ya subidos por POST /media/upload). */

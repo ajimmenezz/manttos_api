@@ -12,16 +12,17 @@ class ConversationParticipant extends Model
 {
     protected $fillable = [
         'conversation_id', 'user_id', 'role', 'joined_at', 'left_at',
-        'last_read_message_id', 'muted_until',
+        'last_read_message_id', 'cleared_before_message_id', 'muted_until',
     ];
 
     protected function casts(): array
     {
         return [
-            'joined_at'            => 'datetime',
-            'left_at'              => 'datetime',
-            'muted_until'          => 'datetime',
-            'last_read_message_id' => 'integer',
+            'joined_at'                 => 'datetime',
+            'left_at'                   => 'datetime',
+            'muted_until'               => 'datetime',
+            'last_read_message_id'      => 'integer',
+            'cleared_before_message_id' => 'integer',
         ];
     }
 
