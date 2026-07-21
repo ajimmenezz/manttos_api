@@ -646,7 +646,7 @@ class EventController extends Controller
 
         $q = \App\Models\Device::whereHas('directory', fn ($d) =>
                 $d->where('site_id', $data['site_id'])->where('catalog_id', $data['system_id'])->where('is_active', true)
-            )->where('is_active', true);
+            )->where('is_active', true)->whereNull('archived_at');
 
         // Filtros por cualquier campo del directorio (select = igualdad, texto = "contiene").
         $dirFilters = $this->parseMaintenanceFilters($request)['dir'];
@@ -745,7 +745,7 @@ class EventController extends Controller
 
         $devices = \App\Models\Device::whereHas('directory', fn ($d) =>
                 $d->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
-            )->where('is_active', true)->get(['custom_fields']);
+            )->where('is_active', true)->whereNull('archived_at')->get(['custom_fields']);
 
         $available = [];
         $modes = [];

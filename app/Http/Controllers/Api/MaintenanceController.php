@@ -56,6 +56,7 @@ class MaintenanceController extends Controller
                 ->from('devices')
                 ->whereColumn('devices.directory_id', 'directories.id')
                 ->where('devices.is_active', true)
+                ->whereNull('devices.archived_at')
             )
             ->select('catalogs.id', 'catalogs.label')
             ->distinct()
@@ -143,6 +144,7 @@ class MaintenanceController extends Controller
                 ->from('devices')
                 ->whereColumn('devices.directory_id', 'directories.id')
                 ->where('devices.is_active', true)
+                ->whereNull('devices.archived_at')
             )
             ->exists();
 
@@ -436,6 +438,7 @@ class MaintenanceController extends Controller
                 ->from('devices')
                 ->whereColumn('devices.directory_id', 'directories.id')
                 ->where('devices.is_active', true)
+                ->whereNull('devices.archived_at')
             )
             ->exists();
 

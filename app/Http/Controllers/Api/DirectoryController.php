@@ -45,7 +45,7 @@ class DirectoryController extends Controller
             ->whereNull('sites.deleted_at')
             ->whereNull('clients.deleted_at')
             ->with(['system', 'site.client'])
-            ->withCount('devices')
+            ->withCount(['devices' => fn ($q) => $q->whereNull('archived_at')])
             ->select('directories.*')
             ->when($request->filled('is_active'), fn ($q) => $q->where('directories.is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN)))
             ->orderBy('clients.name')
@@ -90,7 +90,7 @@ class DirectoryController extends Controller
 
         $directories = $site->directories()
             ->with('system')
-            ->withCount('devices')
+            ->withCount(['devices' => fn ($q) => $q->whereNull('archived_at')])
             ->orderBy('created_at')
             ->get()
             ->map(fn ($d) => $this->serialize($d));
@@ -182,7 +182,7 @@ class DirectoryController extends Controller
             'display_name' => $d->display_name,
             'notes'        => $d->notes,
             'is_active'    => $d->is_active,
-            'devices_count'=> $d->devices_count ?? $d->devices()->count(),
+            'devices_count'=> $d->devices_count ?? $d->devices()->whereNull('archived_at')->count(),
             'created_at'   => $d->created_at,
         ];
     }

@@ -54,7 +54,7 @@ class DeviceImportExportController extends Controller
         abort_unless($request->user()->can('devices.export'), 403, 'Sin permiso para exportar dispositivos.');
 
         $fields  = $this->loadActiveFields($directory, $client->id);
-        $devices = $directory->devices()->orderBy('created_at')->get();
+        $devices = $directory->devices()->whereNull('archived_at')->orderBy('created_at')->get();
 
         $spreadsheet = new Spreadsheet();
         $sheet       = $spreadsheet->getActiveSheet();

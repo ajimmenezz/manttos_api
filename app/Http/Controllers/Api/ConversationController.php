@@ -38,9 +38,11 @@ class ConversationController extends Controller
             ->where('user_id', $user->id)
             ->whereNull('left_at')
             ->get()
-            ->filter(fn ($p) => $p->conversation !== null)
-            // Orden por actividad; las recién creadas (sin mensajes) primero por id.
-            ->sortByDesc(fn ($p) => $p->conversation->last_message_at?->timestamp ?? PHP_INT_MAX)
+            // Solo conversaciones con actividad: las recién creadas SIN mensajes (p. ej.
+            // el chat de un evento/mantenimiento que nadie ha usado) no ensucian la lista.
+            // Aparecen en cuanto se envía el primer mensaje (que fija last_message_at).
+            ->filter(fn ($p) => $p->conversation !== null && $p->conversation->last_message_at !== null)
+            ->sortByDesc(fn ($p) => $p->conversation->last_message_at?->timestamp ?? 0)
             ->values();
 
         $data = $participations->map(fn (ConversationParticipant $p) => $this->serialize(

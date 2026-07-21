@@ -41,7 +41,11 @@ class DeviceController extends Controller
         // Clave del campo DID (puede no ser 'did' si se definió con otra clave).
         $didKey = trim((string) $request->did_key) ?: 'did';
 
+        // ?archived=1 muestra los archivados ("vaciados"); por defecto solo los visibles.
+        $showArchived = $request->boolean('archived');
+
         $devices = $directory->devices()
+            ->when($showArchived, fn ($q) => $q->archived(), fn ($q) => $q->visible())
             ->when($request->search, fn ($q) => $q->where('name', 'ilike', "%{$request->search}%"))
             ->when($request->filled('is_active'), fn ($q) => $q->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN)))
             ->when(!empty($cfFilters), function ($q) use ($cfFilters) {
@@ -64,6 +68,7 @@ class DeviceController extends Controller
         $allFields = DB::table('devices')
             ->where('directory_id', $directory->id)
             ->where('is_active', true)
+            ->whereNull('archived_at')
             ->whereNotNull('custom_fields')
             ->pluck('custom_fields');
 
@@ -165,6 +170,44 @@ class DeviceController extends Controller
         $status = $device->is_active ? 'activado' : 'desactivado';
 
         return response()->json(['message' => "Dispositivo {$status}.", 'device' => $device]);
+    }
+
+    /**
+     * "Vaciar directorio": archiva todos los dispositivos visibles del directorio. Dejan
+     * de verse en el directorio, los selectores y los mantenimientos, pero se conservan
+     * para los eventos que los referencian. Reversible con restoreAll / restore.
+     */
+    public function archiveAll(Request $request, Client $client, Site $site, Directory $directory): JsonResponse
+    {
+        $this->authorizeDirectoryAccess($request, $client, $site, $directory);
+        abort_unless($request->user()->can('devices.archive'), 403, 'No autorizado para esta acción.');
+
+        $count = $directory->devices()->visible()->update(['archived_at' => now()]);
+
+        return response()->json(['message' => "Directorio vaciado: {$count} dispositivo(s) archivado(s).", 'archived' => $count]);
+    }
+
+    /** Restaura TODOS los dispositivos archivados del directorio. */
+    public function restoreAll(Request $request, Client $client, Site $site, Directory $directory): JsonResponse
+    {
+        $this->authorizeDirectoryAccess($request, $client, $site, $directory);
+        abort_unless($request->user()->can('devices.archive'), 403, 'No autorizado para esta acción.');
+
+        $count = $directory->devices()->archived()->update(['archived_at' => null]);
+
+        return response()->json(['message' => "Restaurados: {$count} dispositivo(s).", 'restored' => $count]);
+    }
+
+    /** Restaura UN dispositivo archivado (vuelve al directorio). */
+    public function restore(Request $request, Client $client, Site $site, Directory $directory, Device $device): JsonResponse
+    {
+        $this->authorizeDirectoryAccess($request, $client, $site, $directory);
+        abort_unless($device->directory_id === $directory->id, 404);
+        abort_unless($request->user()->can('devices.archive'), 403, 'No autorizado para esta acción.');
+
+        $device->update(['archived_at' => null]);
+
+        return response()->json(['message' => 'Dispositivo restaurado.', 'device' => $device]);
     }
 
 }

@@ -89,6 +89,8 @@ class FloorPlanController extends Controller
 
         $placements = $floorPlan->placements()
             ->with('device:id,directory_id,name,device_type,status,custom_fields')
+            // Un dispositivo archivado ("vaciado") no debe seguir apareciendo en el plano.
+            ->whereHas('device', fn ($d) => $d->whereNull('archived_at'))
             ->when($request->filled('directory_id'), fn ($q) => $q->whereHas(
                 'device',
                 fn ($d) => $d->where('directory_id', $request->integer('directory_id'))

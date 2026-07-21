@@ -83,6 +83,7 @@ class PermissionSeeder extends Seeder
         'devices.toggle-status',
         'devices.import',
         'devices.export',
+        'devices.archive',              // vaciar directorio / restaurar (reversible)
 
         // ── Planos del sitio ────────────────────────────────────────
         'floor-plans.view',

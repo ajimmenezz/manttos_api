@@ -342,7 +342,7 @@ class MaintenanceActionPlanController extends Controller
 
         $devices = Device::whereHas('directory', fn ($q) =>
                 $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
-            )->where('is_active', true)->get(['id', 'device_type', 'custom_fields']);
+            )->where('is_active', true)->whereNull('archived_at')->get(['id', 'device_type', 'custom_fields']);
 
         $fields = [];
 
@@ -444,7 +444,7 @@ class MaintenanceActionPlanController extends Controller
         // ── Dispositivos del sistema en el sitio, por tipo ────────────────────
         $devices = Device::whereHas('directory', fn ($q) =>
                 $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
-            )->where('is_active', true)->get(['id', 'name', 'device_type', 'custom_fields']);
+            )->where('is_active', true)->whereNull('archived_at')->get(['id', 'name', 'device_type', 'custom_fields']);
         $deviceMap = $devices->keyBy('id');
 
         // Clave del campo DID del sistema (para etiquetar la tarea con el identificador

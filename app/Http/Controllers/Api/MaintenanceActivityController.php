@@ -84,7 +84,7 @@ class MaintenanceActivityController extends Controller
         $systemId = $maintenance->catalog_id;
 
         $directories = Directory::with([
-            'devices' => fn ($q) => $q->where('is_active', true)->orderBy('name'),
+            'devices' => fn ($q) => $q->where('is_active', true)->whereNull('archived_at')->orderBy('name'),
         ])
             ->where('site_id', $maintenance->site_id)
             ->where('catalog_id', $systemId)
@@ -138,7 +138,7 @@ class MaintenanceActivityController extends Controller
         $deviceIds = Device::whereHas('directory', fn ($q) => $q
             ->where('site_id', $maintenance->site_id)
             ->where('catalog_id', $maintenance->catalog_id)
-        )->pluck('id');
+        )->whereNull('archived_at')->pluck('id');
 
         $plans = FloorPlan::where('site_id', $maintenance->site_id)
             ->where('is_active', true)
@@ -250,7 +250,7 @@ class MaintenanceActivityController extends Controller
         // ── Universo base (para metadatos de filtros disponibles) ─────────────
         $baseDeviceQuery = Device::whereHas('directory', fn ($q) =>
             $q->where('site_id', $siteId)->where('catalog_id', $systemId)->where('is_active', true)
-        )->where('is_active', true);
+        )->where('is_active', true)->whereNull('archived_at');
         $baseDevices = (clone $baseDeviceQuery)->get(['id', 'custom_fields']);
 
         $baseActivities = MaintenanceActivity::where('maintenance_id', $maintenance->id)

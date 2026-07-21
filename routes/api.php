@@ -312,10 +312,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post("{$devBase}/import/validate",[DeviceImportExportController::class, 'validateImport']);
     Route::get( "{$devBase}/filter-values",  [DeviceController::class, 'fieldValues']);
     Route::post("{$devBase}/import",          [DeviceImportExportController::class, 'import']);
+    // Vaciar directorio / restaurar (estáticas ANTES del apiResource {device})
+    Route::post("{$devBase}/archive-all",     [DeviceController::class, 'archiveAll']);
+    Route::post("{$devBase}/restore-all",     [DeviceController::class, 'restoreAll']);
 
     // Dispositivos (anidados en directorio)
     Route::apiResource('/clients/{client}/sites/{site}/directories/{directory}/devices', DeviceController::class)->except(['destroy']);
     Route::post('/clients/{client}/sites/{site}/directories/{directory}/devices/{device}/toggle-status', [DeviceController::class, 'toggleStatus']);
+    Route::post('/clients/{client}/sites/{site}/directories/{directory}/devices/{device}/restore', [DeviceController::class, 'restore']);
 
     // Media — upload y eliminación de imágenes
     Route::post('/media/upload',  [MediaController::class, 'upload']);
