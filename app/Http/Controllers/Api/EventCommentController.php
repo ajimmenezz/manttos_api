@@ -93,20 +93,52 @@ class EventCommentController extends Controller
         // sin confirmar ni encolar el job antes del commit.
         $this->notify($event, $comment, $author, $mentionIds, $parent);
 
-        // Webhook saliente con el comentario.
-        app(WebhookDispatcher::class)->dispatch(
+        // Webhooks salientes. `comment_added` sale por cualquier comentario; además, si
+        // el comentario responde a otro o menciona usuarios, se disparan también los
+        // escenarios específicos (cada uno es suscribible por separado).
+        $dispatcher = app(WebhookDispatcher::class);
+        $commentPayload = [
+            'id'         => $comment->id,
+            'body'       => $this->plainBody($comment->body),
+            'author'     => ['id' => $author->id, 'name' => $author->name],
+            'created_at' => $comment->created_at?->toISOString(),
+        ];
+
+        $dispatcher->dispatch(
             WebhookEvent::EVENT_COMMENT_ADDED,
             $event->client_id,
             $event->site_id,
-            WebhookEvent::eventData($event, $author, [
-                'comment' => [
-                    'id'      => $comment->id,
-                    'body'    => $this->plainBody($comment->body),
-                    'author'  => ['id' => $author->id, 'name' => $author->name],
-                    'created_at' => $comment->created_at?->toISOString(),
-                ],
-            ]),
+            WebhookEvent::eventData($event, $author, ['comment' => $commentPayload]),
         );
+
+        if ($parent) {
+            $dispatcher->dispatch(
+                WebhookEvent::EVENT_REPLY,
+                $event->client_id,
+                $event->site_id,
+                WebhookEvent::eventData($event, $author, [
+                    'comment' => $commentPayload,
+                    'parent'  => [
+                        'id'      => $parent->id,
+                        'author'  => $parent->user_id ? ['id' => $parent->user_id] : null,
+                    ],
+                ]),
+            );
+        }
+
+        if ($mentionIds->isNotEmpty()) {
+            $mentioned = $mentionable->only($mentionIds->all())
+                ->map(fn ($u) => ['id' => $u->id, 'name' => $u->name])->values();
+            $dispatcher->dispatch(
+                WebhookEvent::EVENT_MENTION,
+                $event->client_id,
+                $event->site_id,
+                WebhookEvent::eventData($event, $author, [
+                    'comment'          => $commentPayload,
+                    'mentioned_users'  => $mentioned,
+                ]),
+            );
+        }
 
         $comment->load(['user:id,name', 'mentionedUsers:id,name']);
         return response()->json(['message' => 'Comentario agregado.', 'comment' => $this->serialize($comment, $request)], 201);

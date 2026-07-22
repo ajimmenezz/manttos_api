@@ -19,8 +19,12 @@ class WebhookDispatcher
     /**
      * @param  array<string,mixed>  $data  payload ya serializado (ver WebhookEvent::eventData)
      */
-    public function dispatch(string $eventType, int $clientId, ?int $siteId, array $data): void
+    public function dispatch(string $eventType, ?int $clientId, ?int $siteId, array $data): void
     {
+        if ($clientId === null) {
+            return; // sin cliente resuelto no hay a quién entregar
+        }
+
         $endpoints = WebhookEndpoint::where('client_id', $clientId)
             ->where('is_active', true)
             ->where(function ($q) use ($siteId) {

@@ -10,6 +10,8 @@ use App\Models\MaintenanceContractFile;
 use App\Models\MaintenanceContractFrequency;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Webhooks\WebhookDispatcher;
+use App\Support\WebhookEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -170,6 +172,14 @@ class MaintenanceController extends Controller
 
         $maintenance->load('system');
 
+        // Webhook saliente a los sistemas suscritos del cliente/sitio.
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::MAINTENANCE_CREATED,
+            $site->client_id,
+            $site->id,
+            WebhookEvent::maintenanceData($maintenance, $request->user()),
+        );
+
         return response()->json(['message' => 'Mantenimiento registrado.', 'maintenance' => $maintenance], 201);
     }
 
@@ -200,6 +210,14 @@ class MaintenanceController extends Controller
 
         $maintenance->update($data);
         $maintenance->load('system');
+
+        // Webhook saliente con el mantenimiento actualizado.
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::MAINTENANCE_UPDATED,
+            $site->client_id,
+            $site->id,
+            WebhookEvent::maintenanceData($maintenance, $request->user()),
+        );
 
         return response()->json(['message' => 'Mantenimiento actualizado.', 'maintenance' => $maintenance]);
     }

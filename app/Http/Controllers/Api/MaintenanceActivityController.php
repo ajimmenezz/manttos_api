@@ -11,6 +11,8 @@ use App\Models\Directory;
 use App\Models\FloorPlan;
 use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
+use App\Services\Webhooks\WebhookDispatcher;
+use App\Support\WebhookEvent;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -206,6 +208,15 @@ class MaintenanceActivityController extends Controller
             'field_values'     => $data['field_values'] ?? [],
             'performed_at'     => $this->resolveExecutionDate($data['performed_at'] ?? null, now()),
         ]);
+
+        // Webhook saliente al cliente/sitio del mantenimiento.
+        $maintenance->loadMissing('site:id,client_id');
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::ACTIVITY_DOCUMENTED,
+            $maintenance->site?->client_id,
+            $maintenance->site_id,
+            WebhookEvent::activityData($activity, $request->user()),
+        );
 
         return response()->json(
             $activity->load(['activityType:id,label', 'user:id,name']),

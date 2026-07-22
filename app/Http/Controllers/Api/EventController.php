@@ -409,6 +409,14 @@ class EventController extends Controller
             }
         });
 
+        // Webhook saliente con el evento actualizado.
+        app(WebhookDispatcher::class)->dispatch(
+            WebhookEvent::EVENT_UPDATED,
+            $event->client_id,
+            $event->site_id,
+            WebhookEvent::eventData($event->fresh(), $request->user()),
+        );
+
         return response()->json(['message' => 'Evento actualizado.', 'event' => $event->fresh()]);
     }
 
