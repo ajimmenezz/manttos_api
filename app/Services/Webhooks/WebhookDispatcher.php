@@ -5,6 +5,7 @@ namespace App\Services\Webhooks;
 use App\Jobs\SendWebhook;
 use App\Models\WebhookDelivery;
 use App\Models\WebhookEndpoint;
+use App\Services\Integrations\IntegrationManager;
 
 /**
  * Punto único para emitir un evento de negocio por webhook. Resuelve los endpoints con
@@ -13,6 +14,10 @@ use App\Models\WebhookEndpoint;
  *
  * Espejo de App\Services\Notifications\Notifier, pero hacia afuera (terceros), no a los
  * usuarios internos. Se llama después de confirmar la transacción del negocio.
+ *
+ * Además reenvía el mismo evento al backbone de INTEGRACIONES (Odoo, Jira, …): así
+ * webhooks e integraciones reaccionan exactamente a los mismos eventos, desde un solo
+ * lugar. El manager de integraciones está apagado por defecto y jamás lanza.
  */
 class WebhookDispatcher
 {
@@ -21,8 +26,11 @@ class WebhookDispatcher
      */
     public function dispatch(string $eventType, ?int $clientId, ?int $siteId, array $data): void
     {
+        // Integraciones externas (a prueba de fallos; si no hay ninguna configurada, no-op).
+        app(IntegrationManager::class)->dispatch($eventType, $clientId, $data);
+
         if ($clientId === null) {
-            return; // sin cliente resuelto no hay a quién entregar
+            return; // sin cliente resuelto no hay a quién entregar por webhook
         }
 
         $endpoints = WebhookEndpoint::where('client_id', $clientId)

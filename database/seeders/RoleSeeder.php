@@ -89,13 +89,15 @@ class RoleSeeder extends Seeder
             'chat.use',
         ]);
 
-        // Admin: todos los permisos excepto config.manage (superadmin) y los *.archive
-        // (superadmin-only por defecto, grantables).
+        // Admin: todos los permisos excepto config.manage (superadmin), los *.archive
+        // (superadmin-only por defecto, grantables) y las integraciones (credenciales
+        // de plataforma, superadmin-only).
         $admin = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
         $admin->syncPermissions(
             Permission::where('guard_name', 'web')
                 ->where('name', '!=', 'config.manage')
                 ->where('name', 'not like', '%.archive')
+                ->where('name', 'not like', 'integrations.%')
                 ->get()
         );
     }

@@ -19,6 +19,8 @@ use App\Http\Controllers\Api\TelegramWebhookController;
 use App\Http\Controllers\Api\WhatsAppWebhookController;
 use App\Http\Controllers\Api\DeveloperTokenController;
 use App\Http\Controllers\Api\WebhookEndpointController;
+use App\Http\Controllers\Api\IntegrationController;
+use App\Http\Controllers\Api\IntegrationInboundController;
 use App\Http\Middleware\RequireWriteScope;
 use App\Http\Controllers\Api\McpController;
 use App\Http\Controllers\Api\MaintenanceActionPlanController;
@@ -77,6 +79,10 @@ Route::post('/telegram/webhook/{channel}', [TelegramWebhookController::class, 'h
 // Webhook público de WhatsApp Cloud API (captación de eventos).
 Route::get('/whatsapp/webhook',  [WhatsAppWebhookController::class, 'verify']);
 Route::post('/whatsapp/webhook', [WhatsAppWebhookController::class, 'handle']);
+
+// Entrada de integraciones externas (Odoo/Jira → nosotros). Autenticada por el secreto
+// de entrada de cada integración; el controlador valida y encola el procesamiento.
+Route::post('/integrations/{provider}/inbound', [IntegrationInboundController::class, 'handle']);
 
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
@@ -199,6 +205,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/developer/webhooks/{webhook}/regenerate-secret', [WebhookEndpointController::class, 'regenerateSecret']);
     Route::post('/developer/webhooks/{webhook}/test',    [WebhookEndpointController::class, 'test']);
     Route::get('/developer/webhooks/{webhook}/deliveries', [WebhookEndpointController::class, 'deliveries']);
+
+    // Integraciones externas (Odoo, Jira, …). Config global o por cliente; superadmin-only.
+    Route::get('/developer/integrations',           [IntegrationController::class, 'index']);
+    Route::put('/developer/integrations',           [IntegrationController::class, 'upsert']);
+    Route::post('/developer/integrations/{integration}/test', [IntegrationController::class, 'test']);
+    Route::post('/developer/integrations/{integration}/regenerate-inbound-secret', [IntegrationController::class, 'regenerateInboundSecret']);
+    Route::get('/developer/integrations/{integration}/logs', [IntegrationController::class, 'logs']);
+    Route::delete('/developer/integrations/{integration}', [IntegrationController::class, 'destroy']);
 
     // Permisos
     Route::get('/permissions', [PermissionController::class, 'index']);

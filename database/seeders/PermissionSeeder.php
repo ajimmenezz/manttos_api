@@ -147,6 +147,10 @@ class PermissionSeeder extends Seeder
         'manuals.view',                 // guías completas web/móvil
         'webhooks.view',                // ver webhooks salientes de su alcance
         'webhooks.manage',              // crear/editar/eliminar/probar webhooks
+
+        // ── Integraciones externas (Odoo, Jira, …) ──────────────────
+        'integrations.view',            // ver integraciones y su bitácora (superadmin)
+        'integrations.manage',          // configurar/probar/activar integraciones (superadmin)
     ];
 
     public function run(): void
