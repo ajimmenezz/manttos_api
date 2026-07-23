@@ -284,6 +284,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Catálogos (industrias, tipos de sitio, etc.)
     Route::get('/catalogs', [CatalogController::class, 'index']);
     Route::get('/catalogs/active/{type}', [CatalogController::class, 'active']);
+    // Exportar / importar tipos de dispositivo entre ambientes (antes del wildcard {catalog}).
+    Route::get('/catalogs/device-types/export',  [CatalogController::class, 'exportDeviceTypes']);
+    Route::post('/catalogs/device-types/import', [CatalogController::class, 'importDeviceTypes']);
     Route::get('/catalogs/{catalog}', [CatalogController::class, 'show']);
     Route::post('/catalogs', [CatalogController::class, 'store']);
     Route::put('/catalogs/{catalog}', [CatalogController::class, 'update']);

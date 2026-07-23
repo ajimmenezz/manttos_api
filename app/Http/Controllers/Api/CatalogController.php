@@ -137,4 +137,70 @@ class CatalogController extends Controller
 
         return response()->json(['message' => "'{$catalog->label}' desactivado."]);
     }
+
+    // ── Exportar / importar tipos de dispositivo (entre ambientes) ────
+
+    /** Descarga los tipos de dispositivo (con su nomenclatura) como JSON. */
+    public function exportDeviceTypes(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('catalogs.view'), 403, 'No autorizado para esta acción.');
+
+        $items = Catalog::where('type', Catalog::TYPE_DEVICE_TYPE)
+            ->orderBy('sort_order')->orderBy('label')
+            ->get(['label', 'nomenclatura', 'sort_order', 'is_active'])
+            ->map(fn ($c) => [
+                'label'        => $c->label,
+                'nomenclatura' => $c->nomenclatura,
+                'sort_order'   => (int) $c->sort_order,
+                'is_active'    => (bool) $c->is_active,
+            ])
+            ->values();
+
+        return response()->json($items)
+            ->header('Content-Disposition', 'attachment; filename="device_types.json"');
+    }
+
+    /**
+     * Importa tipos de dispositivo desde un JSON exportado. Upsert por nombre (label):
+     * los nuevos se crean, los existentes se actualizan. Idempotente, no duplica.
+     */
+    public function importDeviceTypes(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('catalogs.create'), 403, 'No autorizado para esta acción.');
+
+        $request->validate(['file' => 'required|file|max:2048']);
+
+        $raw   = file_get_contents($request->file('file')->getRealPath());
+        $items = json_decode($raw, true);
+        abort_unless(is_array($items), 422, 'El archivo no es un JSON válido (se esperaba un arreglo).');
+
+        $created = 0; $updated = 0; $skipped = 0;
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($items, &$created, &$updated, &$skipped) {
+            foreach ($items as $row) {
+                $label = trim((string) ($row['label'] ?? ''));
+                if ($label === '') { $skipped++; continue; }
+
+                $existing = Catalog::where('type', Catalog::TYPE_DEVICE_TYPE)->where('label', $label)->first();
+                $payload  = [
+                    'nomenclatura' => $row['nomenclatura'] ?? null,
+                    'sort_order'   => (int) ($row['sort_order'] ?? 0),
+                    'is_active'    => (bool) ($row['is_active'] ?? true),
+                ];
+
+                if ($existing) {
+                    $existing->update($payload);
+                    $updated++;
+                } else {
+                    Catalog::create($payload + ['type' => Catalog::TYPE_DEVICE_TYPE, 'label' => $label]);
+                    $created++;
+                }
+            }
+        });
+
+        return response()->json([
+            'message' => "Importación lista: {$created} nuevos, {$updated} actualizados" . ($skipped ? ", {$skipped} omitidos" : '') . '.',
+            'created' => $created, 'updated' => $updated, 'skipped' => $skipped,
+        ]);
+    }
 }
