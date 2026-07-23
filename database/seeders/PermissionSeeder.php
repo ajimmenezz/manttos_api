@@ -111,6 +111,7 @@ class PermissionSeeder extends Seeder
         'events.change-status',
         'events.comment',              // conversación / @menciones
         'events.assign',               // asignar/reasignar un evento a un ingeniero (pool)
+        'events.archive',              // archivar/restaurar eventos (fuera de interfaz y reportes; superadmin-only por defecto)
 
         // ── Captación de eventos (WhatsApp/Telegram) ────────────────
         'channels.manage',             // alta y configuración de líneas de mensajería + agente

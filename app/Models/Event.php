@@ -35,6 +35,7 @@ class Event extends Model
         'created_by',
         'assigned_to',
         'occurred_at',
+        'archived_at',
     ];
 
     protected function casts(): array
@@ -49,8 +50,21 @@ class Event extends Model
             'occurred_at'            => 'datetime',
             'scheduled_attention_at' => 'datetime',
             'priority_auto'          => 'boolean',
+            'archived_at'            => 'datetime',
         ];
     }
+
+    /** ¿Está archivado? (no aparece en interfaz ni reportería). */
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    // Scopes de conveniencia. NUNCA como global scope: la exclusión por defecto la
+    // aplica ScopesEvents (punto único de interfaz + reportería), y así las relaciones
+    // (Event::device(), etc.) siguen resolviendo un evento archivado.
+    public function scopeVisible($query)  { return $query->whereNull('events.archived_at'); }
+    public function scopeArchived($query) { return $query->whereNotNull('events.archived_at'); }
 
     protected static function booted(): void
     {

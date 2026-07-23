@@ -50,7 +50,10 @@ class EventController extends Controller
 
     private function authorizeAccess(Request $request, Event $event): void
     {
-        $ok = $this->scopeEvents($request, Event::query()->where('events.id', $event->id))->exists();
+        // Quien puede archivar (por defecto solo superadmin) alcanza también los archivados
+        // —para verlos/restaurarlos—; el resto de roles no los ve en absoluto.
+        $includeArchived = $request->user()->can('events.archive');
+        $ok = $this->scopeEvents($request, Event::query()->where('events.id', $event->id), $includeArchived)->exists();
         abort_unless($ok, 403, 'No tienes acceso a este evento.');
     }
 
@@ -77,9 +80,45 @@ class EventController extends Controller
             ->orderByDesc('events.created_at');
         // La exclusión de clientes/sitios archivados la aplica scopeEvents() (trait).
 
-        $this->scopeEvents($request, $query);
+        // ?archived=1 → SOLO los archivados (requiere events.archive; por defecto superadmin).
+        $showArchived = $request->boolean('archived');
+        if ($showArchived) {
+            abort_unless($request->user()->can('events.archive'), 403, 'No autorizado para ver eventos archivados.');
+            $query->whereNotNull('events.archived_at');
+        }
+
+        $this->scopeEvents($request, $query, $showArchived);
 
         return response()->json($query->paginate($request->per_page ?? 100));
+    }
+
+    // ─── Archivar / restaurar (fuera de interfaz y reportería) ────
+    /**
+     * Archiva un evento: deja de aparecer en el listado y en los reportes, pero se conserva
+     * (reversible). Gated por events.archive (por defecto solo superadmin).
+     */
+    public function archive(Request $request, Event $event): JsonResponse
+    {
+        abort_unless($request->user()->can('events.archive'), 403, 'No autorizado para archivar eventos.');
+        $this->authorizeAccess($request, $event);
+
+        if (! $event->archived_at) {
+            $event->update(['archived_at' => now()]);
+        }
+
+        return response()->json(['message' => "Evento {$event->folio} archivado."]);
+    }
+
+    public function restore(Request $request, Event $event): JsonResponse
+    {
+        abort_unless($request->user()->can('events.archive'), 403, 'No autorizado para restaurar eventos.');
+        $this->authorizeAccess($request, $event);
+
+        if ($event->archived_at) {
+            $event->update(['archived_at' => null]);
+        }
+
+        return response()->json(['message' => "Evento {$event->folio} restaurado."]);
     }
 
     // ─── Crear (dos flujos) ───────────────────────────────────────

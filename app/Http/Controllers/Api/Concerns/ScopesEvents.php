@@ -11,9 +11,15 @@ use Illuminate\Http\Request;
  */
 trait ScopesEvents
 {
-    protected function scopeEvents(Request $request, $query)
+    protected function scopeEvents(Request $request, $query, bool $includeArchived = false)
     {
         $user = $request->user();
+
+        // Eventos ARCHIVADOS fuera de la interfaz Y de la reportería por defecto (este es
+        // el punto único de ambos). El manejo de archivados los incluye explícitamente.
+        if (! $includeArchived) {
+            $query->whereNull('events.archived_at');
+        }
 
         // Ocultar eventos de clientes o sitios archivados (soft-deleted) para TODOS
         // los roles — incluida la reportería. whereHas respeta el SoftDeletes scope.
