@@ -37,4 +37,14 @@ abstract class AbstractIntegrationProvider implements IntegrationProvider
     {
         return []; // todos
     }
+
+    public function supportedActions(): array
+    {
+        return [];
+    }
+
+    public function runAction(string $action, array $params, Integration $config): array
+    {
+        return ['ok' => false, 'message' => 'Este proveedor no soporta acciones manuales todavía.'];
+    }
 }

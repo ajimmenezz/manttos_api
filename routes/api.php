@@ -210,6 +210,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/developer/integrations',           [IntegrationController::class, 'index']);
     Route::put('/developer/integrations',           [IntegrationController::class, 'upsert']);
     Route::post('/developer/integrations/{integration}/test', [IntegrationController::class, 'test']);
+    Route::post('/developer/integrations/{integration}/action', [IntegrationController::class, 'action']);
     Route::post('/developer/integrations/{integration}/regenerate-inbound-secret', [IntegrationController::class, 'regenerateInboundSecret']);
     Route::get('/developer/integrations/{integration}/logs', [IntegrationController::class, 'logs']);
     Route::delete('/developer/integrations/{integration}', [IntegrationController::class, 'destroy']);

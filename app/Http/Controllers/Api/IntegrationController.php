@@ -33,6 +33,7 @@ class IntegrationController extends Controller
             'description'      => $p->description(),
             'schema'           => $p->configSchema(),
             'subscribed_events' => $p->subscribedEvents(),
+            'actions'          => $p->supportedActions(),
         ])->values();
 
         $integrations = Integration::with('client:id,name')->get()
@@ -107,6 +108,43 @@ class IntegrationController extends Controller
         $result = $provider->testConnection($integration);
 
         $integration->update($result['ok']
+            ? ['last_ok_at' => now(), 'last_error' => null]
+            : ['last_error_at' => now(), 'last_error' => $result['message'] ?? null]);
+
+        return response()->json($result);
+    }
+
+    // ── Probador de acciones (ejecuta EN VIVO contra el externo) ──────
+    public function action(Request $request, Integration $integration): JsonResponse
+    {
+        abort_unless($request->user()->can('integrations.manage'), 403, 'No autorizado para esta acción.');
+
+        $data = $request->validate([
+            'action' => ['required', 'string'],
+            'params' => ['array'],
+        ]);
+
+        $provider = $this->manager->provider($integration->provider);
+        abort_unless($provider, 422, 'Proveedor desconocido.');
+
+        $result = $provider->runAction($data['action'], $data['params'] ?? [], $integration);
+
+        // Deja constancia en la bitácora (como "consulta" manual).
+        IntegrationLog::create([
+            'integration_id' => $integration->id,
+            'provider'       => $integration->provider,
+            'client_id'      => $integration->client_id,
+            'direction'      => 'query',
+            'event_type'     => 'action:' . $data['action'],
+            'status'         => ($result['ok'] ?? false) ? 'success' : 'failed',
+            'attempts'       => 1,
+            'payload'        => $data['params'] ?? [],
+            'response'       => $result,
+            'error'          => ($result['ok'] ?? false) ? null : ($result['message'] ?? null),
+            'delivered_at'   => now(),
+        ]);
+
+        $integration->update(($result['ok'] ?? false)
             ? ['last_ok_at' => now(), 'last_error' => null]
             : ['last_error_at' => now(), 'last_error' => $result['message'] ?? null]);
 

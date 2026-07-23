@@ -71,4 +71,20 @@ interface IntegrationProvider
      * @return array<int,string>
      */
     public function subscribedEvents(): array;
+
+    /**
+     * Acciones que se pueden disparar a mano desde el "probador" de la UI (crear ticket,
+     * comentar, transicionar, listar proyectos…). Cada una declara sus parámetros.
+     *
+     * @return array<int,array{key:string,label:string,description?:string,params:array<int,array{key:string,label:string,required?:bool,type?:string}>}>
+     */
+    public function supportedActions(): array;
+
+    /**
+     * Ejecuta una acción del probador contra el sistema externo, EN VIVO.
+     *
+     * @param  array<string,mixed>  $params
+     * @return array{ok:bool,message:string,data?:mixed,url?:string}
+     */
+    public function runAction(string $action, array $params, Integration $config): array;
 }
