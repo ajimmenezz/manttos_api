@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\Integration;
+use App\Models\IntegrationLog;
 use App\Services\Integrations\IntegrationManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
