@@ -515,6 +515,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);
     Route::post('/my-maintenances',         [MaintenanceController::class, 'quickCreate']);
     Route::get('/maintenances/{maintenance}', [MaintenanceController::class, 'show']);
+    Route::post('/maintenances/{maintenance}/archive', [MaintenanceController::class, 'archive']); // archivar (fuera de listas)
+    Route::post('/maintenances/{maintenance}/restore', [MaintenanceController::class, 'restore']);
     Route::get('/maintenances/{maintenance}/frequencies',      [MaintenanceController::class, 'frequencies']);
     Route::post('/maintenances/{maintenance}/frequencies/sync', [MaintenanceController::class, 'syncFrequencies']);
     Route::get('/maintenances/{maintenance}/contract-files',                 [MaintenanceController::class, 'contractFiles']);

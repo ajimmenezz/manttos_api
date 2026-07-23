@@ -137,6 +137,7 @@ class PermissionSeeder extends Seeder
         'maintenances.record-activity', // registrar / editar / eliminar actividad
         'maintenances.schedule-devices',// programar dispositivos (separado de record-activity)
         'maintenances.action-plan',     // planeación de capacidad + agenda
+        'maintenances.archive',         // archivar/restaurar mantenimientos (fuera de listas; superadmin-only por defecto)
 
         // ── Actividades ─────────────────────────────────────────────
         'activities.view-registration-date',

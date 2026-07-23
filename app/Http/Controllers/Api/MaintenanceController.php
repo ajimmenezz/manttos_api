@@ -100,6 +100,31 @@ class MaintenanceController extends Controller
         abort(403, 'No tienes acceso a este mantenimiento.');
     }
 
+    // ── Archivar / restaurar (fuera de las listas) ────────────────────────────
+    public function archive(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.archive'), 403, 'No autorizado para archivar mantenimientos.');
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
+
+        if (! $maintenance->archived_at) {
+            $maintenance->update(['archived_at' => now()]);
+        }
+
+        return response()->json(['message' => 'Mantenimiento archivado.']);
+    }
+
+    public function restore(Request $request, Maintenance $maintenance): JsonResponse
+    {
+        abort_unless($request->user()->can('maintenances.archive'), 403, 'No autorizado para restaurar mantenimientos.');
+        $this->authorizeMaintenanceAccess($request->user(), $maintenance);
+
+        if ($maintenance->archived_at) {
+            $maintenance->update(['archived_at' => null]);
+        }
+
+        return response()->json(['message' => 'Mantenimiento restaurado.']);
+    }
+
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public function index(Request $request, Client $client, Site $site): JsonResponse
@@ -107,9 +132,16 @@ class MaintenanceController extends Controller
         $this->authorizeSiteAccess($request, $client, $site);
         abort_unless($request->user()->can('maintenances.view'), 403, 'Sin permiso para ver mantenimientos.');
 
+        $showArchived = $request->boolean('archived');
+        if ($showArchived) {
+            abort_unless($request->user()->can('maintenances.archive'), 403, 'No autorizado para ver mantenimientos archivados.');
+        }
+
         $maintenances = Maintenance::with(['system', 'engineers:id,name,email'])
             ->withCount('engineers')
             ->where('site_id', $site->id)
+            ->when(! $showArchived, fn ($q) => $q->whereNull('maintenances.archived_at'))
+            ->when($showArchived,   fn ($q) => $q->whereNotNull('maintenances.archived_at'))
             ->when($request->filled('status'),    fn ($q) => $q->where('status', $request->status))
             ->when($request->filled('date_from'), fn ($q) => $q->where('start_date', '>=', $request->date_from))
             ->when($request->filled('date_to'),   fn ($q) => $q->where('start_date', '<=', $request->date_to))
@@ -340,10 +372,17 @@ class MaintenanceController extends Controller
     {
         $user = $request->user();
 
+        $showArchived = $request->boolean('archived');
+        if ($showArchived) {
+            abort_unless($user->can('maintenances.archive'), 403, 'No autorizado para ver mantenimientos archivados.');
+        }
+
         $query = Maintenance::with(['system', 'site.client'])
             // Oculta mantenimientos cuyo sitio o cliente esté archivado (cascada lógica);
             // sin esto, site.client llega null y el grid del front revienta.
             ->whereHas('site', fn ($q) => $q->whereHas('client'))
+            ->when(! $showArchived, fn ($q) => $q->whereNull('maintenances.archived_at'))
+            ->when($showArchived,   fn ($q) => $q->whereNotNull('maintenances.archived_at'))
             ->when($request->filled('status'),    fn ($q) => $q->where('status', $request->status))
             ->when($request->filled('date_from'), fn ($q) => $q->where('start_date', '>=', $request->date_from))
             ->when($request->filled('date_to'),   fn ($q) => $q->where('start_date', '<=', $request->date_to))

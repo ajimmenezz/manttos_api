@@ -19,6 +19,7 @@ class Maintenance extends Model
         'notes',
         'agenda_rules',
         'created_by',
+        'archived_at',
     ];
 
     protected function casts(): array
@@ -27,8 +28,18 @@ class Maintenance extends Model
             'start_date'   => 'date',
             'end_date'     => 'date',
             'agenda_rules' => 'array',
+            'archived_at'  => 'datetime',
         ];
     }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    // Nunca como global scope: la exclusión por defecto la hacen las consultas de listado.
+    public function scopeVisible($query)  { return $query->whereNull('maintenances.archived_at'); }
+    public function scopeArchived($query) { return $query->whereNotNull('maintenances.archived_at'); }
 
     public function site()
     {
