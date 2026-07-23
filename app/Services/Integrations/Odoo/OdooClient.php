@@ -98,6 +98,40 @@ class OdooClient
         return is_array($res) ? $res : [];
     }
 
+    // ── Descubrimiento de modelos/campos (API completa) ───────────────
+
+    /** Lista modelos (ir.model) para descubrir qué existe. */
+    public function models(string $query = '', int $limit = 100): array
+    {
+        $domain = $query === '' ? [] : ['|', ['model', 'ilike', $query], ['name', 'ilike', $query]];
+        return $this->searchRead('ir.model', $domain, ['model', 'name'], $limit);
+    }
+
+    /** Campos de un modelo (nombre, etiqueta, tipo). */
+    public function fields(string $model): array
+    {
+        $res = $this->execute($model, 'fields_get', [], ['attributes' => ['string', 'type']]);
+        $out = [];
+        if (is_array($res)) {
+            foreach ($res as $name => $meta) {
+                $out[] = ['field' => $name, 'label' => $meta['string'] ?? null, 'type' => $meta['type'] ?? null];
+            }
+        }
+        return $out;
+    }
+
+    /** Actualiza registros (write). @param array<int,int> $ids @param array<string,mixed> $values */
+    public function write(string $model, array $ids, array $values): bool
+    {
+        return (bool) $this->execute($model, 'write', [$ids, (object) $values]);
+    }
+
+    /** Elimina registros (unlink). @param array<int,int> $ids */
+    public function unlink(string $model, array $ids): bool
+    {
+        return (bool) $this->execute($model, 'unlink', [$ids]);
+    }
+
     // ── Operaciones de negocio ────────────────────────────────────────
 
     /** @return array<int,array<string,mixed>> */

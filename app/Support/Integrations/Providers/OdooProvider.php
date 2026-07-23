@@ -101,14 +101,48 @@ class OdooProvider extends AbstractIntegrationProvider
     public function supportedActions(): array
     {
         return [
+            // ── Negocio (atajos guiados) ──────────────────────────────
             ['key' => 'ping',            'label' => 'Probar conexión',          'description' => 'Verifica alcance y credenciales.', 'params' => []],
             ['key' => 'inventory',       'label' => 'Consultar inventario',     'description' => '¿Hay existencias de un producto?', 'params' => [['key' => 'sku', 'label' => 'SKU o nombre del producto', 'required' => true]]],
             ['key' => 'list_partners',   'label' => 'Buscar clientes/proveedores', 'params' => [['key' => 'query', 'label' => 'Nombre o correo (vacío = primeros)', 'required' => false]]],
             ['key' => 'list_products',   'label' => 'Buscar productos',         'params' => [['key' => 'query', 'label' => 'Nombre o SKU', 'required' => false]]],
-            ['key' => 'create_quotation', 'label' => 'Crear cotización de prueba', 'description' => 'Crea un sale.order borrador para un cliente.', 'params' => [['key' => 'partner_id', 'label' => 'ID del cliente (de “Buscar clientes”)', 'required' => true]]],
+            ['key' => 'create_quotation', 'label' => 'Crear cotización',        'description' => 'Crea un sale.order borrador para un cliente.', 'params' => [['key' => 'partner_id', 'label' => 'ID del cliente (de “Buscar clientes”)', 'required' => true]]],
             ['key' => 'get_sale_order',  'label' => 'Ver cotización / pedido',  'params' => [['key' => 'id', 'label' => 'ID del sale.order', 'required' => true]]],
-            ['key' => 'create_purchase', 'label' => 'Crear orden de compra de prueba', 'params' => [['key' => 'partner_id', 'label' => 'ID del proveedor', 'required' => true]]],
+            ['key' => 'create_purchase', 'label' => 'Crear orden de compra',    'params' => [['key' => 'partner_id', 'label' => 'ID del proveedor', 'required' => true]]],
             ['key' => 'get_purchase',    'label' => 'Ver orden de compra',      'params' => [['key' => 'id', 'label' => 'ID del purchase.order', 'required' => true]]],
+            ['key' => 'list_invoices',   'label' => 'Facturas de venta',        'params' => []],
+            ['key' => 'list_deliveries', 'label' => 'Entregas (stock.picking)', 'params' => []],
+
+            // ── Descubrimiento ────────────────────────────────────────
+            ['key' => 'list_models',     'label' => 'Descubrir · listar modelos', 'description' => 'Explora qué modelos existen en tu Odoo.', 'params' => [['key' => 'query', 'label' => 'Filtro (p. ej. sale, stock, account)', 'required' => false]]],
+            ['key' => 'fields_get',      'label' => 'Descubrir · campos de un modelo', 'params' => [['key' => 'model', 'label' => 'Modelo (p. ej. sale.order)', 'required' => true]]],
+
+            // ── Genérico: TODA la API de Odoo ─────────────────────────
+            ['key' => 'search_read',     'label' => 'Avanzado · buscar en cualquier modelo', 'description' => 'search_read con dominio y campos.', 'params' => [
+                ['key' => 'model', 'label' => 'Modelo', 'required' => true],
+                ['key' => 'domain', 'label' => 'Dominio (JSON, p. ej. [["state","=","sale"]])', 'type' => 'textarea'],
+                ['key' => 'fields', 'label' => 'Campos (separados por coma; vacío = básicos)'],
+                ['key' => 'limit', 'label' => 'Límite (por defecto 20)'],
+            ]],
+            ['key' => 'create_record',   'label' => 'Avanzado · crear registro', 'params' => [
+                ['key' => 'model', 'label' => 'Modelo', 'required' => true],
+                ['key' => 'values', 'label' => 'Valores (JSON, p. ej. {"name":"X"})', 'type' => 'textarea', 'required' => true],
+            ]],
+            ['key' => 'update_record',   'label' => 'Avanzado · actualizar registros', 'params' => [
+                ['key' => 'model', 'label' => 'Modelo', 'required' => true],
+                ['key' => 'ids', 'label' => 'IDs (separados por coma)', 'required' => true],
+                ['key' => 'values', 'label' => 'Valores (JSON)', 'type' => 'textarea', 'required' => true],
+            ]],
+            ['key' => 'delete_record',   'label' => 'Avanzado · eliminar registros', 'params' => [
+                ['key' => 'model', 'label' => 'Modelo', 'required' => true],
+                ['key' => 'ids', 'label' => 'IDs (separados por coma)', 'required' => true],
+            ]],
+            ['key' => 'execute',         'label' => 'Avanzado · ejecutar método (execute_kw)', 'description' => 'Llama cualquier método de cualquier modelo.', 'params' => [
+                ['key' => 'model', 'label' => 'Modelo', 'required' => true],
+                ['key' => 'method', 'label' => 'Método (p. ej. action_confirm)', 'required' => true],
+                ['key' => 'args', 'label' => 'Args (JSON array, p. ej. [[42]])', 'type' => 'textarea'],
+                ['key' => 'kwargs', 'label' => 'Kwargs (JSON object)', 'type' => 'textarea'],
+            ]],
         ];
     }
 
@@ -144,11 +178,69 @@ class OdooProvider extends AbstractIntegrationProvider
                 case 'get_purchase':
                     $r = $client->getPurchaseOrder((int) ($params['id'] ?? 0));
                     return ['ok' => true, 'message' => 'OC ' . ($r['name'] ?? ''), 'data' => $r, 'url' => $r['url'] ?? null];
+                case 'list_invoices':
+                    return ['ok' => true, 'message' => 'Facturas de venta.', 'data' => $client->searchRead('account.move', [['move_type', '=', 'out_invoice']], ['name', 'partner_id', 'amount_total', 'state', 'invoice_date'], 20)];
+                case 'list_deliveries':
+                    return ['ok' => true, 'message' => 'Entregas.', 'data' => $client->searchRead('stock.picking', [], ['name', 'partner_id', 'state', 'scheduled_date'], 20)];
+
+                case 'list_models':
+                    return ['ok' => true, 'message' => 'Modelos.', 'data' => $client->models((string) ($params['query'] ?? ''))];
+                case 'fields_get':
+                    return ['ok' => true, 'message' => 'Campos del modelo.', 'data' => $client->fields((string) ($params['model'] ?? ''))];
+
+                case 'search_read':
+                    $fields = array_values(array_filter(array_map('trim', explode(',', (string) ($params['fields'] ?? '')))));
+                    if (empty($fields)) $fields = ['id', 'display_name'];
+                    $limit = (int) ($params['limit'] ?? 0);
+                    $rows = $client->searchRead((string) ($params['model'] ?? ''), (array) $this->parseJson((string) ($params['domain'] ?? ''), []), $fields, $limit > 0 ? $limit : 20);
+                    return ['ok' => true, 'message' => count($rows) . ' resultado(s).', 'data' => $rows];
+                case 'create_record':
+                    $model = (string) ($params['model'] ?? '');
+                    $id = $client->create($model, (array) $this->parseJson((string) ($params['values'] ?? ''), []));
+                    return ['ok' => true, 'message' => "Registro creado (id {$id}).", 'data' => ['id' => $id], 'url' => $client->recordUrl($model, $id)];
+                case 'update_record':
+                    $ok = $client->write((string) ($params['model'] ?? ''), $this->parseIds($params['ids'] ?? ''), (array) $this->parseJson((string) ($params['values'] ?? ''), []));
+                    return ['ok' => $ok, 'message' => $ok ? 'Registros actualizados.' : 'No se actualizó nada.'];
+                case 'delete_record':
+                    $ok = $client->unlink((string) ($params['model'] ?? ''), $this->parseIds($params['ids'] ?? ''));
+                    return ['ok' => $ok, 'message' => $ok ? 'Registros eliminados.' : 'No se eliminó nada.'];
+                case 'execute':
+                    $res = $client->execute(
+                        (string) ($params['model'] ?? ''),
+                        (string) ($params['method'] ?? ''),
+                        (array) $this->parseJson((string) ($params['args'] ?? ''), []),
+                        (array) $this->parseJson((string) ($params['kwargs'] ?? ''), []),
+                    );
+                    return ['ok' => true, 'message' => 'Método ejecutado.', 'data' => $res];
+
                 default:
                     return ['ok' => false, 'message' => 'Acción desconocida: ' . $action];
             }
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         }
+    }
+
+    /** Parsea un parámetro JSON; vacío = default; JSON inválido lanza para avisar al usuario. */
+    private function parseJson(string $raw, $default)
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return $default;
+        }
+        $decoded = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \InvalidArgumentException('JSON inválido: ' . json_last_error_msg());
+        }
+        return $decoded;
+    }
+
+    /** "1, 2,3" → [1,2,3] */
+    private function parseIds($raw): array
+    {
+        return array_values(array_filter(
+            array_map(fn ($s) => (int) trim($s), explode(',', (string) $raw)),
+            fn ($n) => $n > 0,
+        ));
     }
 }
