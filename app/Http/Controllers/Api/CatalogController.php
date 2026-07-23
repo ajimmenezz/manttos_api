@@ -168,11 +168,9 @@ class CatalogController extends Controller
     {
         abort_unless($request->user()->can('catalogs.create'), 403, 'No autorizado para esta acción.');
 
-        $request->validate(['file' => 'required|file|max:2048']);
-
-        $raw   = file_get_contents($request->file('file')->getRealPath());
-        $items = json_decode($raw, true);
-        abort_unless(is_array($items), 422, 'El archivo no es un JSON válido (se esperaba un arreglo).');
+        // El front lee el archivo y manda el arreglo como JSON (evita líos de multipart).
+        $items = $request->input('items');
+        abort_unless(is_array($items), 422, 'Se esperaba una lista de tipos de dispositivo.');
 
         $created = 0; $updated = 0; $skipped = 0;
 
