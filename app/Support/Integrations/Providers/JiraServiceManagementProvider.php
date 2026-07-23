@@ -180,6 +180,24 @@ class JiraServiceManagementProvider extends AbstractIntegrationProvider
             ['key' => 'add_comment',        'label' => 'Comentar ticket',            'params' => [['key' => 'key', 'label' => 'Clave', 'required' => true], ['key' => 'body', 'label' => 'Comentario', 'type' => 'textarea', 'required' => true]]],
             ['key' => 'list_transitions',   'label' => 'Ver transiciones posibles',  'params' => [['key' => 'key', 'label' => 'Clave', 'required' => true]]],
             ['key' => 'transition_issue',   'label' => 'Cambiar estado (transición)', 'params' => [['key' => 'key', 'label' => 'Clave', 'required' => true], ['key' => 'transition_id', 'label' => 'ID de transición', 'required' => true]]],
+            ['key' => 'assign_issue',       'label' => 'Asignar ticket',             'params' => [['key' => 'key', 'label' => 'Clave', 'required' => true], ['key' => 'account_id', 'label' => 'accountId del usuario (de “Buscar usuarios”)', 'required' => true]]],
+            ['key' => 'list_comments',      'label' => 'Ver comentarios',            'params' => [['key' => 'key', 'label' => 'Clave', 'required' => true]]],
+
+            // ── Descubrimiento ────────────────────────────────────────
+            ['key' => 'jql_search',         'label' => 'Buscar issues (JQL)',        'description' => 'Consulta por JQL, p. ej. project = SUP AND status = "In Progress".', 'params' => [['key' => 'jql', 'label' => 'JQL', 'type' => 'textarea', 'required' => true], ['key' => 'max', 'label' => 'Máximo (por defecto 20)']]],
+            ['key' => 'list_users',         'label' => 'Buscar usuarios',            'params' => [['key' => 'query', 'label' => 'Nombre o correo', 'required' => true]]],
+            ['key' => 'list_priorities',    'label' => 'Descubrir · prioridades',    'params' => []],
+            ['key' => 'list_statuses',      'label' => 'Descubrir · estados',        'params' => []],
+            ['key' => 'list_fields',        'label' => 'Descubrir · campos',         'params' => []],
+
+            // ── Genérico: TODA la API de Jira ─────────────────────────
+            ['key' => 'create_issue_advanced', 'label' => 'Avanzado · crear issue (campos JSON)', 'description' => 'Crea un issue con control total del objeto fields.', 'params' => [['key' => 'fields', 'label' => 'fields (JSON, p. ej. {"project":{"key":"SUP"},"summary":"X","issuetype":{"name":"Task"}})', 'type' => 'textarea', 'required' => true]]],
+            ['key' => 'update_issue',       'label' => 'Avanzado · actualizar issue', 'params' => [['key' => 'key', 'label' => 'Clave', 'required' => true], ['key' => 'fields', 'label' => 'fields (JSON)', 'type' => 'textarea', 'required' => true]]],
+            ['key' => 'raw_request',        'label' => 'Avanzado · petición cruda (cualquier endpoint)', 'description' => 'Pega a cualquier endpoint de la API de Jira.', 'params' => [
+                ['key' => 'method', 'label' => 'Método (GET/POST/PUT/DELETE)', 'required' => true],
+                ['key' => 'path', 'label' => 'Ruta (p. ej. /rest/api/2/myself o /rest/servicedeskapi/servicedesk)', 'required' => true],
+                ['key' => 'body', 'label' => 'Body (JSON, para POST/PUT)', 'type' => 'textarea'],
+            ]],
         ];
     }
 
@@ -217,11 +235,55 @@ class JiraServiceManagementProvider extends AbstractIntegrationProvider
                 case 'transition_issue':
                     $r = $client->transition((string) ($params['key'] ?? ''), (string) ($params['transition_id'] ?? ''));
                     return ['ok' => true, 'message' => 'Estado cambiado.', 'data' => $r, 'url' => $r['url']];
+                case 'assign_issue':
+                    $r = $client->assignIssue((string) ($params['key'] ?? ''), (string) ($params['account_id'] ?? ''));
+                    return ['ok' => true, 'message' => 'Ticket asignado.', 'data' => $r, 'url' => $r['url']];
+                case 'list_comments':
+                    return ['ok' => true, 'message' => 'Comentarios.', 'data' => $client->comments((string) ($params['key'] ?? ''))];
+
+                case 'jql_search':
+                    $max = (int) ($params['max'] ?? 0);
+                    $rows = $client->search((string) ($params['jql'] ?? ''), [], $max > 0 ? $max : 20);
+                    return ['ok' => true, 'message' => count($rows) . ' issue(s).', 'data' => $rows];
+                case 'list_users':
+                    return ['ok' => true, 'message' => 'Usuarios.', 'data' => $client->users((string) ($params['query'] ?? ''))];
+                case 'list_priorities':
+                    return ['ok' => true, 'message' => 'Prioridades.', 'data' => $client->priorities()];
+                case 'list_statuses':
+                    return ['ok' => true, 'message' => 'Estados.', 'data' => $client->statuses()];
+                case 'list_fields':
+                    return ['ok' => true, 'message' => 'Campos.', 'data' => $client->fieldsList()];
+
+                case 'create_issue_advanced':
+                    $r = $client->createIssueRaw((array) $this->parseJson((string) ($params['fields'] ?? ''), []));
+                    return ['ok' => true, 'message' => 'Issue creado: ' . ($r['key'] ?? ''), 'data' => $r, 'url' => $r['url'] ?? null];
+                case 'update_issue':
+                    $r = $client->updateIssue((string) ($params['key'] ?? ''), (array) $this->parseJson((string) ($params['fields'] ?? ''), []));
+                    return ['ok' => true, 'message' => 'Issue actualizado.', 'data' => $r, 'url' => $r['url'] ?? null];
+                case 'raw_request':
+                    $body = trim((string) ($params['body'] ?? '')) === '' ? null : (array) $this->parseJson((string) $params['body'], []);
+                    $res = $client->raw((string) ($params['method'] ?? 'GET'), (string) ($params['path'] ?? ''), $body);
+                    return ['ok' => true, 'message' => 'Petición ejecutada.', 'data' => $res];
+
                 default:
                     return ['ok' => false, 'message' => 'Acción desconocida: ' . $action];
             }
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         }
+    }
+
+    /** Parsea un parámetro JSON; vacío = default; JSON inválido lanza para avisar. */
+    private function parseJson(string $raw, $default)
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return $default;
+        }
+        $decoded = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \InvalidArgumentException('JSON inválido: ' . json_last_error_msg());
+        }
+        return $decoded;
     }
 }

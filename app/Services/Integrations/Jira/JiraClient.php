@@ -153,6 +153,105 @@ class JiraClient
         return $key ? rtrim((string) $this->config->conf('base_url'), '/') . '/browse/' . $key : '';
     }
 
+    // ── Búsqueda / metadatos / acceso completo ────────────────────────
+
+    /** Búsqueda por JQL. Proyección legible; para control total usa raw(). */
+    public function search(string $jql, array $fields = [], int $max = 20): array
+    {
+        $body = ['jql' => $jql, 'maxResults' => $max];
+        if (! empty($fields)) {
+            $body['fields'] = $fields;
+        }
+        $data = $this->post('/rest/api/2/search', $body);
+        return array_map(fn ($i) => [
+            'key'      => $i['key'] ?? null,
+            'summary'  => $i['fields']['summary'] ?? null,
+            'status'   => $i['fields']['status']['name'] ?? null,
+            'assignee' => $i['fields']['assignee']['displayName'] ?? null,
+            'url'      => $this->browseUrl($i['key'] ?? ''),
+        ], $data['issues'] ?? []);
+    }
+
+    /** Crea un issue con campos arbitrarios (control total del objeto fields). */
+    public function createIssueRaw(array $fields): array
+    {
+        $res = $this->post('/rest/api/2/issue', ['fields' => $fields]);
+        return ['key' => $res['key'] ?? null, 'id' => $res['id'] ?? null, 'url' => $this->browseUrl($res['key'] ?? '')];
+    }
+
+    /** Actualiza campos de un issue (PUT /issue/{key}). */
+    public function updateIssue(string $key, array $fields): array
+    {
+        $this->put("/rest/api/2/issue/{$key}", ['fields' => $fields]);
+        return ['ok' => true, 'url' => $this->browseUrl($key)];
+    }
+
+    /** Asigna un issue por accountId. */
+    public function assignIssue(string $key, string $accountId): array
+    {
+        $this->put("/rest/api/2/issue/{$key}/assignee", ['accountId' => $accountId]);
+        return ['ok' => true, 'url' => $this->browseUrl($key)];
+    }
+
+    public function users(string $query, int $max = 20): array
+    {
+        $data = $this->get('/rest/api/2/user/search', ['query' => $query, 'maxResults' => $max]);
+        return array_map(fn ($u) => [
+            'account_id' => $u['accountId'] ?? null,
+            'name'       => $u['displayName'] ?? null,
+            'email'      => $u['emailAddress'] ?? null,
+            'active'     => $u['active'] ?? null,
+        ], is_array($data) ? $data : []);
+    }
+
+    public function priorities(): array
+    {
+        $data = $this->get('/rest/api/2/priority');
+        return array_map(fn ($p) => ['id' => $p['id'] ?? null, 'name' => $p['name'] ?? null], is_array($data) ? $data : []);
+    }
+
+    public function statuses(): array
+    {
+        $data = $this->get('/rest/api/2/status');
+        return array_map(fn ($s) => ['id' => $s['id'] ?? null, 'name' => $s['name'] ?? null, 'category' => $s['statusCategory']['name'] ?? null], is_array($data) ? $data : []);
+    }
+
+    public function fieldsList(): array
+    {
+        $data = $this->get('/rest/api/2/field');
+        return array_map(fn ($f) => ['id' => $f['id'] ?? null, 'name' => $f['name'] ?? null, 'custom' => $f['custom'] ?? null], is_array($data) ? $data : []);
+    }
+
+    public function comments(string $key): array
+    {
+        $data = $this->get("/rest/api/2/issue/{$key}/comment");
+        return array_map(fn ($c) => [
+            'author'  => $c['author']['displayName'] ?? null,
+            'body'    => $c['body'] ?? null,
+            'created' => $c['created'] ?? null,
+        ], $data['comments'] ?? []);
+    }
+
+    /**
+     * Petición CRUDA a cualquier endpoint de la API de Jira. Acceso total.
+     *
+     * @param  array<string,mixed>|null  $body
+     * @return array<string,mixed>
+     */
+    public function raw(string $method, string $path, ?array $body = null): array
+    {
+        $http = $this->http();
+        $path = '/' . ltrim($path, '/');
+        $res = match (strtoupper($method)) {
+            'GET'    => $http->get($path),
+            'DELETE' => $http->delete($path),
+            'PUT'    => $http->put($path, $body ?? []),
+            'PATCH'  => $http->patch($path, $body ?? []),
+            default  => $http->post($path, $body ?? []),
+        };
+        return $this->handle($res);
+    }
+
     // ── HTTP interno ──────────────────────────────────────────────────
 
     private function http(): PendingRequest
@@ -172,6 +271,11 @@ class JiraClient
     private function post(string $path, array $body): array
     {
         return $this->handle($this->http()->post($path, $body));
+    }
+
+    private function put(string $path, array $body): array
+    {
+        return $this->handle($this->http()->put($path, $body));
     }
 
     private function handle(Response $res): array
