@@ -64,6 +64,21 @@ return [
             ]) : [],
         ],
 
+        // Sistema externo (ADIST3) — SOLO LECTURA, para migrar datos históricos.
+        // Credenciales en .env local (no se commitean). Se usa vía DB::connection('pruebas').
+        'pruebas' => [
+            'driver' => 'mysql',
+            'host' => env('DB_PRUEBAS_HOST', '127.0.0.1'),
+            'port' => env('DB_PRUEBAS_PORT', '3306'),
+            'database' => env('DB_PRUEBAS_DATABASE', ''),
+            'username' => env('DB_PRUEBAS_USER', ''),
+            'password' => env('DB_PRUEBAS_PASSWORD', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => false,
+        ],
+
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),
