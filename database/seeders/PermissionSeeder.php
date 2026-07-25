@@ -153,6 +153,7 @@ class PermissionSeeder extends Seeder
         // ── Integraciones externas (Odoo, Jira, …) ──────────────────
         'integrations.view',            // ver integraciones y su bitácora (superadmin)
         'integrations.manage',          // configurar/probar/activar integraciones (superadmin)
+        'integrations.import-external',  // importar datos de un sistema anterior (ADIST) a un mantenimiento (superadmin)
     ];
 
     public function run(): void

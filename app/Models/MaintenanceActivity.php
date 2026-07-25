@@ -13,6 +13,7 @@ class MaintenanceActivity extends Model
         'user_id',
         'field_values',
         'performed_at',
+        'source_ref',
     ];
 
     protected function casts(): array

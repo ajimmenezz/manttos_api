@@ -4,9 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Catalog;
+use App\Models\EventStatus;
 use App\Models\EventType;
+use App\Models\EventTypeAutomation;
 use App\Models\EventTypeField;
 use App\Models\EventTypeTransition;
+use App\Models\User;
+use App\Services\Integrations\IntegrationManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -289,5 +293,189 @@ class EventTypeController extends Controller
         });
 
         return response()->json(['message' => 'Flujo del tipo actualizado.']);
+    }
+
+    // ─── Automatizaciones a nivel evento (server-side) ───────────────────
+
+    /** Lista de automatizaciones de un par (event_type, system). */
+    public function automations(EventType $eventType, int $systemId): JsonResponse
+    {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->resolveSystem($systemId);
+
+        $rows = EventTypeAutomation::with('targetEventType:id,label')
+            ->where('event_type_id', $eventType->id)
+            ->where('system_id', $systemId)
+            ->orderBy('sort_order')->orderBy('id')
+            ->get();
+
+        return response()->json($rows->map(fn ($a) => $this->presentEventAutomation($a)));
+    }
+
+    /**
+     * Opciones para armar una automatización de evento: catálogo de proveedores de
+     * integración con sus acciones, tipos de evento ligados (para seguimiento), estados de
+     * evento (para cambio de estado interno) y usuarios asignables (asignación interna).
+     */
+    public function automationOptions(EventType $eventType, int $systemId): JsonResponse
+    {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->resolveSystem($systemId);
+
+        $providers = collect(app(IntegrationManager::class)->providers())
+            ->map(fn ($p, $key) => [
+                'key'     => $key,
+                'label'   => $p->label(),
+                'actions' => $p->supportedActions(),
+            ])->values();
+
+        $eventTypeIds = DB::table('event_type_systems')->where('system_id', $systemId)->pluck('event_type_id');
+        $eventTypes = EventType::whereIn('id', $eventTypeIds)->where('is_active', true)->orderBy('label')->get(['id', 'label']);
+
+        $statuses = EventStatus::where('is_active', true)->orderBy('sort_order')->get(['id', 'key', 'label']);
+
+        // Usuarios asignables (ingenieros/técnicos): para la acción interna de asignación.
+        $assignees = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['ingeniero', 'tecnico']))
+            ->orderBy('name')->get(['id', 'name']);
+
+        return response()->json([
+            'providers'   => $providers,
+            'event_types' => $eventTypes,
+            'statuses'    => $statuses,
+            'assignees'   => $assignees,
+            'events'      => EventTypeAutomation::EVENTS,
+            'action_kinds' => EventTypeAutomation::ACTION_KINDS,
+            'internal_actions' => EventTypeAutomation::INTERNAL_ACTIONS,
+        ]);
+    }
+
+    public function storeAutomation(Request $request, EventType $eventType, int $systemId): JsonResponse
+    {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->resolveSystem($systemId);
+
+        $data = $this->validateEventAutomation($request);
+        $maxOrder = EventTypeAutomation::where('event_type_id', $eventType->id)
+            ->where('system_id', $systemId)->max('sort_order') ?? -1;
+
+        $automation = EventTypeAutomation::create(array_merge($data, [
+            'event_type_id' => $eventType->id,
+            'system_id'     => $systemId,
+            'sort_order'    => $maxOrder + 1,
+        ]));
+
+        return response()->json($this->presentEventAutomation($automation->fresh('targetEventType:id,label')), 201);
+    }
+
+    public function updateAutomation(Request $request, EventType $eventType, int $systemId, EventTypeAutomation $automation): JsonResponse
+    {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->assertEventAutomationBelongs($automation, $eventType->id, $systemId);
+
+        $automation->update($this->validateEventAutomation($request));
+
+        return response()->json($this->presentEventAutomation($automation->fresh('targetEventType:id,label')));
+    }
+
+    public function toggleAutomation(Request $request, EventType $eventType, int $systemId, EventTypeAutomation $automation): JsonResponse
+    {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->assertEventAutomationBelongs($automation, $eventType->id, $systemId);
+
+        $automation->update(['is_active' => ! $automation->is_active]);
+
+        return response()->json(['is_active' => $automation->is_active]);
+    }
+
+    public function reorderAutomations(Request $request, EventType $eventType, int $systemId): JsonResponse
+    {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->resolveSystem($systemId);
+
+        $ids = $request->validate(['ids' => 'required|array', 'ids.*' => 'integer'])['ids'];
+        DB::transaction(function () use ($ids, $eventType, $systemId) {
+            foreach ($ids as $index => $id) {
+                EventTypeAutomation::where('id', $id)
+                    ->where('event_type_id', $eventType->id)->where('system_id', $systemId)
+                    ->update(['sort_order' => $index]);
+            }
+        });
+
+        return response()->json(['message' => 'Orden guardado.']);
+    }
+
+    public function destroyAutomation(Request $request, EventType $eventType, int $systemId, EventTypeAutomation $automation): JsonResponse
+    {
+        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        $this->assertEventAutomationBelongs($automation, $eventType->id, $systemId);
+
+        $automation->delete();
+
+        return response()->json(['message' => 'Automatización eliminada.']);
+    }
+
+    private function assertEventAutomationBelongs(EventTypeAutomation $automation, int $eventTypeId, int $systemId): void
+    {
+        abort_unless(
+            $automation->event_type_id === $eventTypeId && $automation->system_id === $systemId,
+            404
+        );
+    }
+
+    private function validateEventAutomation(Request $request): array
+    {
+        return $request->validate([
+            'name'            => 'required|string|max:120',
+            'is_active'       => 'boolean',
+            'event'           => 'required|in:' . implode(',', EventTypeAutomation::EVENTS),
+            'status_key'      => 'nullable|string|max:120',
+            'trigger'         => 'nullable|array',
+            'action_kind'     => 'required|in:' . implode(',', EventTypeAutomation::ACTION_KINDS),
+            'provider'        => 'nullable|string|in:odoo,jira|required_if:action_kind,integration,query',
+            'action'          => 'nullable|string|max:60|required_if:action_kind,integration,query',
+            'params_map'                 => 'nullable|array',
+            'params_map.*.param_key'     => 'required|string|max:60',
+            'params_map.*.mode'          => 'required|in:constant,field',
+            'params_map.*.value'         => 'nullable',
+            'params_map.*.source'        => 'nullable|in:form,device,event',
+            'params_map.*.source_field_key' => 'nullable|string|max:60',
+            'lines_map'       => 'nullable|array',
+            'result_target'   => 'nullable|string|max:60',
+            'internal_action' => 'nullable|in:' . implode(',', EventTypeAutomation::INTERNAL_ACTIONS) . '|required_if:action_kind,internal',
+            'internal_config' => 'nullable|array',
+            'target_event_type_id' => 'nullable|integer|exists:event_types,id|required_if:action_kind,event',
+            'prefill'                    => 'nullable|array',
+            'prefill.*.target_field_key' => 'required|string|max:60',
+            'prefill.*.mode'             => 'required|in:constant,copy',
+            'prefill.*.value'            => 'nullable',
+            'prefill.*.source'           => 'nullable|in:form,device',
+            'prefill.*.source_field_key' => 'nullable|string|max:60',
+            'run_once'        => 'boolean',
+        ]);
+    }
+
+    private function presentEventAutomation(EventTypeAutomation $a): array
+    {
+        return [
+            'id'                   => $a->id,
+            'name'                 => $a->name,
+            'is_active'            => $a->is_active,
+            'sort_order'           => $a->sort_order,
+            'event'                => $a->event,
+            'status_key'           => $a->status_key,
+            'trigger'              => $a->trigger,
+            'action_kind'          => $a->action_kind,
+            'provider'             => $a->provider,
+            'action'               => $a->action,
+            'params_map'           => $a->params_map ?? [],
+            'lines_map'            => $a->lines_map ?? [],
+            'result_target'        => $a->result_target,
+            'internal_action'      => $a->internal_action,
+            'internal_config'      => $a->internal_config ?? [],
+            'target_event_type_id' => $a->target_event_type_id,
+            'target_label'         => $a->targetEventType->label ?? null,
+            'prefill'              => $a->prefill ?? [],
+            'run_once'             => $a->run_once,
+        ];
     }
 }

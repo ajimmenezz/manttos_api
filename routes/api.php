@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\TelegramWebhookController;
 use App\Http\Controllers\Api\WhatsAppWebhookController;
 use App\Http\Controllers\Api\DeveloperTokenController;
 use App\Http\Controllers\Api\WebhookEndpointController;
+use App\Http\Controllers\Api\AdistImportController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\IntegrationInboundController;
 use App\Http\Middleware\RequireWriteScope;
@@ -215,6 +216,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/developer/integrations/{integration}/logs', [IntegrationController::class, 'logs']);
     Route::delete('/developer/integrations/{integration}', [IntegrationController::class, 'destroy']);
 
+    // Importación desde ADIST3 (sistema anterior). Superadmin-only (integrations.import-external).
+    Route::get('/developer/imports/adist/options',  [AdistImportController::class, 'options']);
+    Route::post('/developer/imports/adist/preview', [AdistImportController::class, 'preview']);
+    Route::post('/developer/imports/adist/task',    [AdistImportController::class, 'task']);
+    Route::post('/developer/imports/adist/commit',  [AdistImportController::class, 'commit']);
+
     // Permisos
     Route::get('/permissions', [PermissionController::class, 'index']);
     Route::get('/permissions/flat', [PermissionController::class, 'flat']);
@@ -400,6 +407,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/fields/{field}',            [EventTypeController::class, 'destroyField']);
         Route::post('/link',                        [EventTypeController::class, 'linkSystem']);
         Route::delete('/link',                      [EventTypeController::class, 'unlinkSystem']);
+
+        // Automatizaciones de evento (server-side)
+        Route::get('/automations',                   [EventTypeController::class, 'automations']);
+        Route::get('/automations/options',           [EventTypeController::class, 'automationOptions']);
+        Route::post('/automations',                  [EventTypeController::class, 'storeAutomation']);
+        Route::post('/automations/reorder',          [EventTypeController::class, 'reorderAutomations']);
+        Route::put('/automations/{automation}',      [EventTypeController::class, 'updateAutomation']);
+        Route::post('/automations/{automation}/toggle-status', [EventTypeController::class, 'toggleAutomation']);
+        Route::delete('/automations/{automation}',   [EventTypeController::class, 'destroyAutomation']);
     });
 
     // ─── Eventos: catálogo de ESTADOS + flujo general ───

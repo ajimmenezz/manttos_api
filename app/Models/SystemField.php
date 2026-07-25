@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class SystemField extends Model
 {
-    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'image', 'did'];
+    public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'custom_list', 'image', 'did'];
 
     protected $fillable = [
         'catalog_id',

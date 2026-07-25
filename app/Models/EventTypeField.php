@@ -10,6 +10,7 @@ class EventTypeField extends Model
     public const FIELD_TYPES = [
         'text', 'textarea', 'number', 'currency', 'scale',
         'date', 'time', 'datetime', 'boolean', 'list', 'multiselect',
+        'custom_list', 'custom_multiselect',
         'image', 'signature', 'leyenda',
     ];
 
@@ -32,7 +33,7 @@ class EventTypeField extends Model
     ];
 
     // Tipos de campo explotables como KPI/filtro en el Reporte de eventos.
-    public const REPORTABLE_TYPES = ['boolean', 'list', 'multiselect', 'scale', 'number', 'currency'];
+    public const REPORTABLE_TYPES = ['boolean', 'list', 'multiselect', 'custom_list', 'custom_multiselect', 'scale', 'number', 'currency'];
 
     protected function casts(): array
     {

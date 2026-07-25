@@ -106,7 +106,11 @@ class OdooProvider extends AbstractIntegrationProvider
             ['key' => 'inventory',       'label' => 'Consultar inventario',     'description' => '¿Hay existencias de un producto?', 'params' => [['key' => 'sku', 'label' => 'SKU o nombre del producto', 'required' => true]]],
             ['key' => 'list_partners',   'label' => 'Buscar clientes/proveedores', 'params' => [['key' => 'query', 'label' => 'Nombre o correo (vacío = primeros)', 'required' => false]]],
             ['key' => 'list_products',   'label' => 'Buscar productos',         'params' => [['key' => 'query', 'label' => 'Nombre o SKU', 'required' => false]]],
-            ['key' => 'create_quotation', 'label' => 'Crear cotización',        'description' => 'Crea un sale.order borrador para un cliente.', 'params' => [['key' => 'partner_id', 'label' => 'ID del cliente (de “Buscar clientes”)', 'required' => true]]],
+            ['key' => 'create_quotation', 'label' => 'Crear cotización',        'description' => 'Crea un sale.order borrador para un cliente (sin líneas).', 'params' => [['key' => 'partner_id', 'label' => 'ID del cliente (de “Buscar clientes”)', 'required' => true]]],
+            ['key' => 'create_quotation_lines', 'label' => 'Crear cotización (con productos)', 'description' => 'Arma una cotización con cliente y líneas de producto tomadas de los campos del evento. El producto se identifica por su ID de Odoo o su SKU.', 'builder' => 'quotation_lines', 'params' => [
+                ['key' => 'partner_id',       'label' => 'Cliente (ID de Odoo)', 'required' => true],
+                ['key' => 'client_order_ref', 'label' => 'Referencia (opcional, p. ej. el folio del evento)', 'required' => false],
+            ]],
             ['key' => 'get_sale_order',  'label' => 'Ver cotización / pedido',  'params' => [['key' => 'id', 'label' => 'ID del sale.order', 'required' => true]]],
             ['key' => 'create_purchase', 'label' => 'Crear orden de compra',    'params' => [['key' => 'partner_id', 'label' => 'ID del proveedor', 'required' => true]]],
             ['key' => 'get_purchase',    'label' => 'Ver orden de compra',      'params' => [['key' => 'id', 'label' => 'ID del purchase.order', 'required' => true]]],
@@ -169,6 +173,17 @@ class OdooProvider extends AbstractIntegrationProvider
                 case 'create_quotation':
                     $r = $client->createQuotation((int) ($params['partner_id'] ?? 0));
                     return ['ok' => true, 'message' => 'Cotización creada: ' . ($r['name'] ?? $r['id']), 'data' => $r, 'url' => $r['url']];
+                case 'create_quotation_lines':
+                    $extra = [];
+                    if (! empty($params['client_order_ref'])) {
+                        $extra['client_order_ref'] = (string) $params['client_order_ref'];
+                    }
+                    $r = $client->createQuotationWithLines(
+                        (int) ($params['partner_id'] ?? 0),
+                        (array) ($params['order_lines'] ?? []),
+                        $extra,
+                    );
+                    return ['ok' => true, 'message' => 'Cotización creada: ' . ($r['name'] ?? $r['id']) . " ({$r['lines']} línea(s))", 'data' => $r, 'url' => $r['url']];
                 case 'get_sale_order':
                     $r = $client->getSaleOrder((int) ($params['id'] ?? 0));
                     return ['ok' => true, 'message' => 'Pedido ' . ($r['name'] ?? ''), 'data' => $r, 'url' => $r['url'] ?? null];

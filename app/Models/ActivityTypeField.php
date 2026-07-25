@@ -9,6 +9,7 @@ class ActivityTypeField extends Model
     public const FIELD_TYPES = [
         'text', 'textarea', 'number', 'currency', 'scale',
         'date', 'time', 'datetime', 'boolean', 'list', 'multiselect',
+        'custom_list', 'custom_multiselect',
         'image', 'signature', 'leyenda',
     ];
 

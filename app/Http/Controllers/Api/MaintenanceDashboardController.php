@@ -412,9 +412,9 @@ class MaintenanceDashboardController extends Controller
     {
         $activityFields = ActivityTypeField::whereIn('activity_type_id', $activityTypes->pluck('id'))
             ->where('system_id', $systemId)
-            ->whereIn('field_type', ['boolean', 'list', 'scale'])
+            ->whereIn('field_type', ['boolean', 'list', 'scale', 'custom_list', 'custom_multiselect'])
             ->where('is_active', true)
-            ->get(['id', 'activity_type_id', 'label', 'field_key', 'field_type']);
+            ->get(['id', 'activity_type_id', 'label', 'field_key', 'field_type', 'config']);
 
         $out = [];
         foreach ($activityFields as $field) {
@@ -430,12 +430,21 @@ class MaintenanceDashboardController extends Controller
                     'field_key' => $field->field_key, 'label' => $field->label, 'activity_type' => $typeName,
                     'type' => 'boolean', 'yes' => $yes, 'no' => $no, 'yes_pct' => round($yes / ($yes + $no) * 100, 1),
                 ];
-            } elseif ($field->field_type === 'list' || $field->field_type === 'scale') {
+            } elseif (in_array($field->field_type, ['list', 'scale', 'custom_list', 'custom_multiselect'], true)) {
+                // Mapa valor→etiqueta para listas personalizadas (se guarda el valor).
+                $labels = collect($field->config['options'] ?? [])
+                    ->filter(fn ($o) => isset($o['value']))
+                    ->mapWithKeys(fn ($o) => [(string) $o['value'] => (string) ($o['label'] ?? $o['value'])]);
                 $dist = [];
                 foreach ($typeActivities as $act) {
-                    $val = $act->field_values[$field->field_key] ?? null;
-                    if ($val === null || $val === '') continue;
-                    $dist[(string) $val] = ($dist[(string) $val] ?? 0) + 1;
+                    $raw = $act->field_values[$field->field_key] ?? null;
+                    // custom_multiselect guarda un arreglo → cada elemento cuenta.
+                    $vals = is_array($raw) ? $raw : [$raw];
+                    foreach ($vals as $val) {
+                        if ($val === null || $val === '') continue;
+                        $key = $labels[(string) $val] ?? (string) $val;
+                        $dist[$key] = ($dist[$key] ?? 0) + 1;
+                    }
                 }
                 if (count($dist) < 2) continue;
                 arsort($dist);

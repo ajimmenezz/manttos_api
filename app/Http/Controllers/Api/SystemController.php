@@ -455,6 +455,8 @@ class SystemController extends Controller
                 422, 'Este sistema ya tiene un campo DID. Solo puede haber uno por sistema.'
             );
             $this->validateDidConfig($system, $data['config'] ?? []);
+        } elseif ($data['field_type'] === 'custom_list') {
+            $data['config'] = $this->sanitizeCustomListConfig($data['config'] ?? []);
         } else {
             $data['config'] = null;
         }
@@ -495,6 +497,8 @@ class SystemController extends Controller
                 422, 'Este sistema ya tiene un campo DID. Solo puede haber uno por sistema.'
             );
             $this->validateDidConfig($system, $data['config'] ?? []);
+        } elseif ($data['field_type'] === 'custom_list') {
+            $data['config'] = $this->sanitizeCustomListConfig($data['config'] ?? []);
         } else {
             $data['config'] = null;
         }
@@ -524,6 +528,32 @@ class SystemController extends Controller
     }
 
     /** Valida la configuración de un campo DID (modo y, si patrón, referencias obligatorias). */
+    /**
+     * Normaliza las opciones de una "lista personalizada": conserva solo {label, value},
+     * descarta filas vacías, exige valores únicos y ≥1 opción.
+     *
+     * @return array{options: array<int,array{label:string,value:string}>}
+     */
+    private function sanitizeCustomListConfig(array $config): array
+    {
+        $opts = collect($config['options'] ?? [])
+            ->map(fn ($o) => [
+                'label' => trim((string) ($o['label'] ?? '')),
+                'value' => trim((string) ($o['value'] ?? '')),
+            ])
+            ->filter(fn ($o) => $o['label'] !== '' || $o['value'] !== '')
+            ->map(fn ($o) => [
+                'label' => $o['label'] !== '' ? $o['label'] : $o['value'],
+                'value' => $o['value'] !== '' ? $o['value'] : $o['label'],
+            ])
+            ->values();
+
+        abort_if($opts->isEmpty(), 422, 'La lista personalizada necesita al menos una opción.');
+        abort_if($opts->pluck('value')->duplicates()->isNotEmpty(), 422, 'Las opciones de la lista tienen valores repetidos.');
+
+        return ['options' => $opts->all()];
+    }
+
     private function validateDidConfig(Catalog $system, array $config): void
     {
         $mode = $config['did_mode'] ?? null;

@@ -140,6 +140,12 @@ class EventCommentController extends Controller
             );
         }
 
+        // Automatizaciones de evento (comentario agregado).
+        app(\App\Services\Events\EventAutomationEngine::class)->run(
+            $event->fresh(['device', 'status', 'eventType', 'client']),
+            'comment_added', $author->id,
+        );
+
         $comment->load(['user:id,name', 'mentionedUsers:id,name']);
         return response()->json(['message' => 'Comentario agregado.', 'comment' => $this->serialize($comment, $request)], 201);
     }

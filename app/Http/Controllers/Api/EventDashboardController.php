@@ -434,7 +434,11 @@ class EventDashboardController extends Controller
                 'currency' => $type === 'currency' ? ($config['currency'] ?? null) : null];
         }
 
-        // distribución (list, multiselect, scale, text, date, did)
+        // distribución (list, multiselect, scale, text, date, did, custom_list, custom_multiselect)
+        // Para listas personalizadas se guarda el VALOR; se agrupa por su ETIQUETA.
+        $labels = collect($config['options'] ?? [])
+            ->filter(fn ($o) => isset($o['value']))
+            ->mapWithKeys(fn ($o) => [(string) $o['value'] => (string) ($o['label'] ?? $o['value'])]);
         $dist = []; $answered = 0;
         foreach ($subset as $e) {
             $v = $valueFn($e);
@@ -442,7 +446,7 @@ class EventDashboardController extends Controller
             $answered++;
             foreach ((is_array($v) ? $v : [$v]) as $x) {
                 if ($x === null || $x === '') continue;
-                $sx = (string) $x;
+                $sx = $labels[(string) $x] ?? (string) $x;
                 $dist[$sx] = ($dist[$sx] ?? 0) + 1;
             }
         }
@@ -505,6 +509,7 @@ class EventDashboardController extends Controller
                 'field_type'   => $f->field_type,
                 'label'        => $f->label,
                 'system_label' => $labels[$f->catalog_id] ?? '—',
+                'config'       => $f->config ?? [],
             ])
             ->keyBy('key');
     }
@@ -619,7 +624,7 @@ class EventDashboardController extends Controller
                 'field_type'   => $def['field_type'],
                 'source'       => 'directory',
             ];
-            $agg = $this->aggregateOne($row, $subset, fn ($e) => $this->dirValue($e, $def), $def['field_type']);
+            $agg = $this->aggregateOne($row, $subset, fn ($e) => $this->dirValue($e, $def), $def['field_type'], $def['config'] ?? []);
             if ($agg) $out[] = $agg;
         }
         return $out;
@@ -635,9 +640,17 @@ class EventDashboardController extends Controller
         'resolucion' => 'Fecha resolución', 'descripcion' => 'Descripción',
     ];
 
-    private function cellStr($v, string $type): string
+    private function cellStr($v, string $type, array $config = []): string
     {
         if ($v === null || $v === '') return '';
+        // Listas personalizadas: se guarda el valor → mostrar la etiqueta.
+        if ($type === 'custom_list' || $type === 'custom_multiselect') {
+            $labels = collect($config['options'] ?? [])
+                ->filter(fn ($o) => isset($o['value']))
+                ->mapWithKeys(fn ($o) => [(string) $o['value'] => (string) ($o['label'] ?? $o['value'])]);
+            $map = fn ($x) => $labels[(string) $x] ?? (string) $x;
+            return is_array($v) ? implode(', ', array_map($map, $v)) : $map($v);
+        }
         if (is_array($v)) return implode(', ', array_map('strval', $v));
         if ($type === 'boolean') return $this->truthy($v) ? 'Sí' : 'No';
         return (string) $v;
@@ -707,7 +720,7 @@ class EventDashboardController extends Controller
                 'header'    => (optional($f->eventType)->label ?? '—') . ' · ' . $f->label,
                 'group'     => 'form',
                 'type_id'   => (int) $f->event_type_id, 'system_id' => (int) $f->system_id,
-                'field_key' => $f->field_key, 'field_type' => $f->field_type,
+                'field_key' => $f->field_key, 'field_type' => $f->field_type, 'config' => $f->config ?? [],
             ])->values();
 
         $devSysIds = $events->filter(fn ($e) => $e->device)->pluck('system_id')->unique();
@@ -720,7 +733,7 @@ class EventDashboardController extends Controller
                     'key'       => 'dir:' . $f->catalog_id . ':' . $f->field_key,
                     'header'    => 'Directorio · ' . ($sysLabels[$f->catalog_id] ?? '—') . ' · ' . $f->label,
                     'group'     => 'directory',
-                    'system_id' => (int) $f->catalog_id, 'field_key' => $f->field_key, 'field_type' => $f->field_type,
+                    'system_id' => (int) $f->catalog_id, 'field_key' => $f->field_key, 'field_type' => $f->field_type, 'config' => $f->config ?? [],
                 ])->values();
         }
 
@@ -768,11 +781,11 @@ class EventDashboardController extends Controller
         ];
         foreach ($defs['form'] as $c) {
             $out[$c['key']] = ($e->event_type_id === $c['type_id'] && $e->system_id === $c['system_id'])
-                ? $this->cellStr($fv[$c['field_key']] ?? null, $c['field_type']) : '';
+                ? $this->cellStr($fv[$c['field_key']] ?? null, $c['field_type'], $c['config'] ?? []) : '';
         }
         foreach ($defs['dir'] as $c) {
             $out[$c['key']] = ($e->device && $e->system_id === $c['system_id'])
-                ? $this->cellStr($cf[$c['field_key']] ?? null, $c['field_type']) : '';
+                ? $this->cellStr($cf[$c['field_key']] ?? null, $c['field_type'], $c['config'] ?? []) : '';
         }
         return $out;
     }

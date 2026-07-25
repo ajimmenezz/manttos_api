@@ -93,13 +93,16 @@ class ClientSystemFieldController extends Controller
         $data = $request->validate([
             'label'             => 'required|string|max:100',
             'field_key'         => 'required|string|max:60|regex:/^[a-z][a-z0-9_]*$/',
-            'field_type'        => 'required|in:text,number,date,boolean,list',
+            'field_type'        => 'required|in:text,number,date,boolean,list,custom_list',
             'catalog_type'      => 'nullable|string|required_if:field_type,list',
             'is_required'       => 'boolean',
             'max_length'        => 'nullable|integer|min:1|max:5000',
             'sort_order'        => 'nullable|integer|min:0',
             'show_in_dashboard' => 'boolean',
+            'config'            => 'nullable|array',
         ]);
+
+        $data['config'] = $this->customListConfig($data);
 
         abort_if(strtolower(trim($data['label'])) === 'id', 422, '"ID" es un nombre reservado por el sistema.');
 
@@ -143,18 +146,49 @@ class ClientSystemFieldController extends Controller
 
         $data = $request->validate([
             'label'             => 'required|string|max:100',
-            'field_type'        => 'required|in:text,number,date,boolean,list',
+            'field_type'        => 'required|in:text,number,date,boolean,list,custom_list',
             'catalog_type'      => 'nullable|string|required_if:field_type,list',
             'is_required'       => 'boolean',
             'max_length'        => 'nullable|integer|min:1|max:5000',
             'show_in_dashboard' => 'boolean',
+            'config'            => 'nullable|array',
         ]);
+
+        $data['config'] = $this->customListConfig($data);
 
         abort_if(strtolower(trim($data['label'])) === 'id', 422, '"ID" es un nombre reservado por el sistema.');
 
         $field->update($data);
 
         return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
+    }
+
+    /**
+     * Config normalizada para 'custom_list' (solo {label,value} únicos, ≥1); null para el resto.
+     *
+     * @param  array<string,mixed>  $data
+     */
+    private function customListConfig(array $data): ?array
+    {
+        if (($data['field_type'] ?? null) !== 'custom_list') {
+            return null;
+        }
+        $opts = collect($data['config']['options'] ?? [])
+            ->map(fn ($o) => [
+                'label' => trim((string) ($o['label'] ?? '')),
+                'value' => trim((string) ($o['value'] ?? '')),
+            ])
+            ->filter(fn ($o) => $o['label'] !== '' || $o['value'] !== '')
+            ->map(fn ($o) => [
+                'label' => $o['label'] !== '' ? $o['label'] : $o['value'],
+                'value' => $o['value'] !== '' ? $o['value'] : $o['label'],
+            ])
+            ->values();
+
+        abort_if($opts->isEmpty(), 422, 'La lista personalizada necesita al menos una opción.');
+        abort_if($opts->pluck('value')->duplicates()->isNotEmpty(), 422, 'Las opciones de la lista tienen valores repetidos.');
+
+        return ['options' => $opts->all()];
     }
 
     public function toggleStatus(Request $request, Client $client, Catalog $system, SystemField $field): JsonResponse

@@ -171,6 +171,76 @@ class OdooClient
         return ['id' => $id, 'name' => $row['name'] ?? null, 'state' => $row['state'] ?? null, 'url' => $this->recordUrl('sale.order', $id)];
     }
 
+    /**
+     * Crea una cotización (sale.order) con cliente + líneas de producto. Cada línea:
+     *   ['product' => id|sku, 'quantity' => n, 'price' => n?, 'description' => str?]
+     * El `product` se resuelve por ID (numérico) o por SKU/nombre (resolveProductId).
+     *
+     * @param  array<int,array<string,mixed>>  $lines
+     * @param  array<string,mixed>  $extra  campos extra del sale.order (p. ej. client_order_ref)
+     */
+    public function createQuotationWithLines(int $partnerId, array $lines, array $extra = []): array
+    {
+        $orderLine = [];
+        foreach ($lines as $line) {
+            $productRef = $line['product'] ?? null;
+            if ($productRef === null || $productRef === '') {
+                continue; // línea sin producto → se omite
+            }
+            $productId = $this->resolveProductId((string) $productRef);
+            $vals = ['product_id' => $productId];
+
+            $qty = $line['quantity'] ?? null;
+            if ($qty !== null && $qty !== '' && is_numeric($qty)) {
+                $vals['product_uom_qty'] = (float) $qty;
+            }
+            if (isset($line['price']) && $line['price'] !== '' && is_numeric($line['price'])) {
+                $vals['price_unit'] = (float) $line['price'];
+            }
+            if (! empty($line['description'])) {
+                $vals['name'] = (string) $line['description'];
+            }
+            // Comando One2many de Odoo: (0, 0, {valores}) = crear línea nueva.
+            $orderLine[] = [0, 0, $vals];
+        }
+
+        abort_if(empty($orderLine), 422, 'No se pudo armar ninguna línea de la cotización (revisa el mapeo de productos).');
+
+        $id = $this->create('sale.order', array_merge([
+            'partner_id' => $partnerId,
+            'order_line' => $orderLine,
+        ], $extra));
+        $row = $this->read('sale.order', [$id], ['name', 'state', 'amount_total'])[0] ?? [];
+        return [
+            'id'    => $id,
+            'name'  => $row['name'] ?? null,
+            'state' => $row['state'] ?? null,
+            'amount_total' => $row['amount_total'] ?? null,
+            'lines' => count($orderLine),
+            'url'   => $this->recordUrl('sale.order', $id),
+        ];
+    }
+
+    /**
+     * Resuelve un producto de Odoo a partir de un valor que puede ser el ID (numérico) o el
+     * SKU (default_code) / nombre. Lanza si no se encuentra, para que la corrida quede fallida
+     * con un mensaje claro en vez de crear una cotización a medias.
+     */
+    public function resolveProductId(string $value): int
+    {
+        $value = trim($value);
+        if ($value !== '' && ctype_digit($value)) {
+            return (int) $value; // ya es un ID de Odoo
+        }
+        // Por SKU exacto (default_code) primero; si no, por nombre aproximado.
+        $rows = $this->searchRead('product.product', [['default_code', '=', $value]], ['id'], 1);
+        if (empty($rows)) {
+            $rows = $this->searchRead('product.product', [['name', 'ilike', $value]], ['id'], 1);
+        }
+        abort_if(empty($rows), 422, "Producto no encontrado en Odoo: «{$value}» (ni por ID, SKU ni nombre).");
+        return (int) $rows[0]['id'];
+    }
+
     public function getSaleOrder(int $id): array
     {
         $row = $this->read('sale.order', [$id], ['name', 'state', 'partner_id', 'amount_total', 'date_order'])[0] ?? [];

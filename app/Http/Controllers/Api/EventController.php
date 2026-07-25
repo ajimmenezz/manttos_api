@@ -16,6 +16,7 @@ use App\Models\EventTypeField;
 use App\Models\EventTypeTransition;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Events\EventAutomationEngine;
 use App\Services\Notifications\Notifier;
 use App\Services\Webhooks\WebhookDispatcher;
 use Carbon\Carbon;
@@ -232,6 +233,12 @@ class EventController extends Controller
             $event->site_id,
             WebhookEvent::eventData($event, $user),
         );
+
+        // Automatizaciones de evento: si el alta ya trajo formulario, cuenta como "documented".
+        app(EventAutomationEngine::class)->run($event->fresh(['device', 'status', 'eventType', 'client']), 'created', $user->id);
+        if ($hasForm) {
+            app(EventAutomationEngine::class)->run($event->fresh(['device', 'status', 'eventType', 'client']), 'documented', $user->id);
+        }
 
         return response()->json(['message' => 'Evento creado.', 'event' => $event->fresh(), 'folio' => $event->folio], 201);
     }
@@ -456,6 +463,10 @@ class EventController extends Controller
             WebhookEvent::eventData($event->fresh(), $request->user()),
         );
 
+        // Automatizaciones: documentar el formulario dispara 'documented'; otro cambio, 'updated'.
+        $lifecycle = ! empty($data['field_values']) ? 'documented' : 'updated';
+        app(EventAutomationEngine::class)->run($event->fresh(['device', 'status', 'eventType', 'client']), $lifecycle, $request->user()->id);
+
         return response()->json(['message' => 'Evento actualizado.', 'event' => $event->fresh()]);
     }
 
@@ -529,6 +540,12 @@ class EventController extends Controller
             ]),
         );
 
+        // Automatizaciones: dispara con la clave del NUEVO estado.
+        app(EventAutomationEngine::class)->run(
+            $event->fresh(['device', 'status', 'eventType', 'client']),
+            'status_changed', $actor->id, ['status_key' => optional($target)->key],
+        );
+
         return response()->json(['message' => 'Estado actualizado.', 'event' => $event->fresh(['status'])]);
     }
 
@@ -598,6 +615,9 @@ class EventController extends Controller
             $event->site_id,
             WebhookEvent::eventData($event->fresh(), $request->user()),
         );
+
+        // Automatizaciones de evento.
+        app(EventAutomationEngine::class)->run($event->fresh(['device', 'status', 'eventType', 'client']), 'assigned', $request->user()->id);
 
         return response()->json([
             'message' => $assignee ? "Evento asignado a {$assignee->name}." : 'Asignación retirada; el evento vuelve al pool.',
@@ -827,7 +847,7 @@ class EventController extends Controller
                 fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)),
                 fn ($q) => $q->whereNull('client_id'))
             ->orderBy('sort_order')->orderBy('id')
-            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'sort_order']);
+            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'config', 'sort_order']);
 
         // El override por cliente (client_id) gana sobre el base (client_id null) con la misma clave.
         return $rows->sortBy(fn ($f) => $f->client_id === null ? 0 : 1)
@@ -837,6 +857,7 @@ class EventController extends Controller
                 'field_key'  => $f->field_key,
                 'label'      => $f->label,
                 'field_type' => $f->field_type,
+                'config'     => $f->config,
             ])->values()->all();
     }
 
