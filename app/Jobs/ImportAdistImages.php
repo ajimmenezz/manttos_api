@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Event;
 use App\Models\MaintenanceActivity;
 use App\Services\Imports\AdistImportService;
 use App\Services\Notifications\Notifier;
@@ -28,20 +29,28 @@ class ImportAdistImages implements ShouldQueue
     }
 
     /**
-     * @param  array<int,array{task_id:int, activity_id:int}>  $pairs
-     * @param  array<int,string>                               $imgKeys
+     * @param  array<int,array{task_id:int, activity_id?:int, event_id?:int}>  $pairs
+     * @param  array<int,string>  $imgKeys  (solo aplica al destino 'activity')
+     * @param  string  $target  'activity' | 'event'
      */
     public function __construct(
         public array $pairs,
         public array $imgKeys,
         public int $userId,
-        public int $maintenanceId,
+        public ?int $maintenanceId = null,
+        public string $target = 'activity',
     ) {
     }
 
     public function handle(AdistImportService $service, Notifier $notifier): void
     {
-        if (! $this->imgKeys || ! $this->pairs) {
+        if (! $this->pairs || ($this->target === 'activity' && ! $this->imgKeys)) {
+            return;
+        }
+
+        if ($this->target === 'event') {
+            $this->handleEvents($service, $notifier);
+
             return;
         }
 
@@ -74,6 +83,40 @@ class ImportAdistImages implements ShouldQueue
             $totalImages > 0
                 ? "Se subieron {$totalImages} imágenes en {$withImages} actividades."
                 : 'Las actividades quedaron importadas (sin imágenes que subir).',
+        );
+    }
+
+    /** Descarga las imágenes de las tareas y las mezcla en `events.images` de cada evento creado. */
+    private function handleEvents(AdistImportService $service, Notifier $notifier): void
+    {
+        $withImages = 0;
+        $totalImages = 0;
+
+        foreach ($this->pairs as $pair) {
+            $event = Event::find($pair['event_id'] ?? 0);
+            if (! $event) {
+                continue;
+            }
+            $n = $service->fillEventImages($event, (int) $pair['task_id']);
+            if ($n > 0) {
+                $withImages++;
+                $totalImages += $n;
+            }
+        }
+
+        $notifier->send(
+            [$this->userId],
+            'import_adist',
+            [
+                'events'      => count($this->pairs),
+                'with_images' => $withImages,
+                'images'      => $totalImages,
+                'url'         => '/events',
+            ],
+            'Importación de ADIST lista',
+            $totalImages > 0
+                ? "Se subieron {$totalImages} imágenes en {$withImages} eventos."
+                : 'Los eventos quedaron importados (sin imágenes que subir).',
         );
     }
 }

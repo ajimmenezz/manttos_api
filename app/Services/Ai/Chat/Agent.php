@@ -24,6 +24,9 @@ class Agent
     /** Reportes visuales generados durante la conversación (para el front). */
     private array $reports = [];
 
+    /** Acciones ofrecidas como opción ("Hacerlo por mí") para pintar botones en el front. */
+    private array $suggestions = [];
+
     public function __construct(
         private ChatProvider $provider,
         private ToolRegistry $registry,
@@ -125,6 +128,10 @@ class Agent
             if (isset($result['__report__'])) {
                 $this->reports[] = $result['__report__'];
             }
+            // Recolectar acciones ofrecidas ("Hacerlo por mí").
+            if (isset($result['__suggestion__'])) {
+                $this->suggestions[] = $result['__suggestion__'];
+            }
 
             $trace[] = [
                 'name'      => $tc['name'],
@@ -153,13 +160,14 @@ class Agent
     private function result(string $status, string $reply = '', array $actions = [], int $usageIn = 0, int $usageOut = 0, array $messages = [], array $pending = []): array
     {
         return [
-            'status'   => $status,
-            'reply'    => $reply,
-            'actions'  => $actions,
-            'pending'  => $pending,
-            'reports'  => $this->reports,
-            'usage'    => ['input' => $usageIn, 'output' => $usageOut],
-            'messages' => $messages,
+            'status'      => $status,
+            'reply'       => $reply,
+            'actions'     => $actions,
+            'pending'     => $pending,
+            'reports'     => $this->reports,
+            'suggestions' => $this->suggestions,
+            'usage'       => ['input' => $usageIn, 'output' => $usageOut],
+            'messages'    => $messages,
         ];
     }
 
@@ -179,9 +187,19 @@ class Agent
         - Responde SIEMPRE en español, de forma clara y concisa.
         - Para cualquier dato del sistema (mantenimientos, clientes, sitios, eventos)
           USA las herramientas disponibles. No inventes datos ni cifras.
-        - Para preguntas de CÓMO funciona el sistema o CÓMO hacer un procedimiento
-          (p. ej. "¿cómo registro una actividad?"), usa `buscar_en_manual` y
-          responde con base en la documentación encontrada.
+
+        - DISTINGUE **ENSEÑAR** de **HACER** — es la regla más importante:
+          · Si el usuario PREGUNTA cómo/dónde/para qué se hace algo ("¿cómo doy de
+            alta un cliente?", "¿cómo registro una actividad?", "¿dónde configuro
+            X?"), quiere APRENDER a hacerlo él mismo. En ese caso: NO ejecutes NINGUNA
+            acción ni herramienta de escritura; usa `buscar_en_manual` y explícale los
+            PASOS con base en la documentación. Al terminar, OFRÉCELE hacerlo por él
+            llamando a `sugerir_accion` (para que le aparezca un botón "Hacerlo por
+            mí"), pero NO lo hagas hasta que lo pida.
+          · Solo EJECUTA la acción cuando el usuario da una ORDEN de hacer ("da de alta
+            el cliente Acme", "regístralo", "créalo con estos datos", "hazlo por mí") o
+            cuando acepta explícitamente tu oferta. Ante la duda entre enseñar y hacer,
+            ENSEÑA y ofrece la acción como opción.
         - Cuando el usuario pida un REPORTE, resumen visual o análisis presentable,
           PRIMERO reúne los datos con las herramientas de lectura y luego usa
           `crear_reporte` para generarlo con KPIs, tablas y gráficas (barras/líneas/
@@ -202,13 +220,14 @@ class Agent
         - Si una herramienta devuelve un error de validación (campo faltante o
           inválido), NO te limites a mostrar el error: explícale al usuario en lenguaje
           natural qué dato falta o está mal, pídeselo, y reintenta con lo que responda.
-        - REGLA PARA CREAR/REGISTRAR: si el usuario NO mencionó los campos OPCIONALES
-          de esa acción, tu PRIMERA respuesta NO debe ejecutar la herramienta. En su
-          lugar: confirma en una frase qué vas a crear, menciona brevemente los campos
-          opcionales disponibles, y pregunta si desea agregar alguno o crear así. Ejecuta
-          la creación hasta el SIGUIENTE turno, con lo que responda. Única excepción:
-          el usuario pide hacerlo de inmediato ("créalo ya", "solo con eso", "sin más").
-          Nunca inventes valores para los opcionales.
+        - REGLA PARA CREAR/REGISTRAR (aplica SOLO cuando el usuario ya pidió HACER la
+          acción, no cuando pregunta cómo): si el usuario NO mencionó los campos
+          OPCIONALES de esa acción, tu PRIMERA respuesta NO debe ejecutar la herramienta.
+          En su lugar: confirma en una frase qué vas a crear, menciona brevemente los
+          campos opcionales disponibles, y pregunta si desea agregar alguno o crear así.
+          Ejecuta la creación hasta el SIGUIENTE turno, con lo que responda. Única
+          excepción: el usuario pide hacerlo de inmediato ("créalo ya", "solo con eso",
+          "sin más"). Nunca inventes valores para los opcionales.
         - Cuando muestres listas, resume lo relevante (no vuelques JSON crudo).
         PROMPT;
     }

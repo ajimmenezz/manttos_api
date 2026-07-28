@@ -3,8 +3,14 @@
 namespace App\Services\Imports;
 
 use App\Models\Catalog;
+use App\Models\Event;
+use App\Models\EventStatus;
+use App\Models\EventStatusHistory;
+use App\Models\EventType;
 use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
+use App\Models\Site;
+use App\Support\EventFolio;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -40,14 +46,18 @@ class AdistImportService
      *
      * @return array{activityType: Catalog, descKey: ?string, imgKeys: array<int,string>, byDid: array<string,array<int,int>>, devices: \Illuminate\Support\Collection}
      */
-    public function resolveContext(Maintenance $maintenance, string $type): array
+    public function resolveContext(Maintenance $maintenance, string $type, ?int $destActivityTypeId = null): array
     {
-        $activityType = Catalog::where('type', Catalog::TYPE_ACTIVITY_TYPE)
-            ->whereRaw('LOWER(label) = ?', [mb_strtolower($type)])
-            ->first();
+        // Destino: tipo de actividad EXPLÍCITO (id) si se indica; si no, por nombre (compat).
+        $activityType = $destActivityTypeId
+            ? Catalog::where('type', Catalog::TYPE_ACTIVITY_TYPE)->find($destActivityTypeId)
+            : Catalog::where('type', Catalog::TYPE_ACTIVITY_TYPE)
+                ->whereRaw('LOWER(label) = ?', [mb_strtolower($type)])->first();
 
         if (! $activityType) {
-            throw new \RuntimeException("No hay tipo de actividad que empate con «{$type}» en el sistema destino.");
+            throw new \RuntimeException($destActivityTypeId
+                ? 'El tipo de actividad destino no existe.'
+                : "No hay tipo de actividad que empate con «{$type}» en el sistema destino.");
         }
 
         $fields = DB::table('activity_type_fields')
@@ -60,10 +70,23 @@ class AdistImportService
         $descKey = optional($fields->firstWhere('field_type', 'text'))->field_key;
         $imgKeys = $fields->where('field_type', 'image')->pluck('field_key')->values()->all();
 
+        ['devices' => $devices, 'byDid' => $byDid] = $this->deviceIndex($maintenance->site_id, $maintenance->catalog_id);
+
+        return compact('activityType', 'descKey', 'imgKeys', 'byDid', 'devices');
+    }
+
+    /**
+     * Índice de dispositivos del directorio (sitio × sistema): la colección y el mapa
+     * DID normalizado → [device_id]. Reusado por la importación a actividades y a eventos.
+     *
+     * @return array{devices: \Illuminate\Support\Collection, byDid: array<string,array<int,int>>}
+     */
+    private function deviceIndex(int $siteId, int $systemId): array
+    {
         $devices = DB::table('devices as d')
             ->join('directories as dir', 'dir.id', '=', 'd.directory_id')
-            ->where('dir.site_id', $maintenance->site_id)
-            ->where('dir.catalog_id', $maintenance->catalog_id)
+            ->where('dir.site_id', $siteId)
+            ->where('dir.catalog_id', $systemId)
             ->whereNull('d.archived_at')
             ->get([
                 'd.id',
@@ -80,7 +103,7 @@ class AdistImportService
             }
         }
 
-        return compact('activityType', 'descKey', 'imgKeys', 'byDid', 'devices');
+        return compact('devices', 'byDid');
     }
 
     /** Trae las tareas de un IdRequest + tipo desde ADIST3 (con su `device` y quién la ejecutó). */
@@ -227,9 +250,9 @@ class AdistImportService
      *
      * @return array<string,mixed>
      */
-    public function preview(Maintenance $maintenance, string|int $requestId, string $type): array
+    public function preview(Maintenance $maintenance, string|int $requestId, string $type, ?int $destActivityTypeId = null): array
     {
-        $ctx = $this->resolveContext($maintenance, $type);
+        $ctx = $this->resolveContext($maintenance, $type, $destActivityTypeId);
         $tasks = $this->fetchTasks($requestId, $type);
 
         $taskIds = array_map(fn ($t) => (int) $t->Id, $tasks);
@@ -311,9 +334,9 @@ class AdistImportService
      * @param  array<int,int>  $map
      * @return array{created: int, pairs: array<int,array{task_id:int, activity_id:int}>, skipped: int, imgKeys: array<int,string>, supports_images: bool}
      */
-    public function createActivities(Maintenance $maintenance, string|int $requestId, string $type, int $userId, array $map): array
+    public function createActivities(Maintenance $maintenance, string|int $requestId, string $type, int $userId, array $map, ?int $destActivityTypeId = null): array
     {
-        $ctx = $this->resolveContext($maintenance, $type);
+        $ctx = $this->resolveContext($maintenance, $type, $destActivityTypeId);
         $tasks = $this->fetchTasks($requestId, $type);
 
         $created = 0;
@@ -362,6 +385,169 @@ class AdistImportService
             'imgKeys'         => $ctx['imgKeys'],
             'supports_images' => count($ctx['imgKeys']) > 0,
         ];
+    }
+
+    // ── Importación como EVENTOS (correctivos que en ADIST vivían dentro del mantenimiento) ──
+
+    /**
+     * Vista previa de la importación como EVENTOS: sitio/sistema/tipo de evento GLOBALES de la
+     * corrida. El dispositivo es OPCIONAL (auto-match por DID único donde exista); las tareas
+     * sin dispositivo igual se importan. Idempotente por events.source_ref.
+     *
+     * @return array<string,mixed>
+     */
+    public function previewEvents(int $siteId, int $systemId, int $eventTypeId, string|int $requestId, string $sourceType): array
+    {
+        $site = Site::with('client')->findOrFail($siteId);
+        $eventType = EventType::findOrFail($eventTypeId);
+        ['devices' => $devices, 'byDid' => $byDid] = $this->deviceIndex($siteId, $systemId);
+        $tasks = $this->fetchTasks($requestId, $sourceType);
+
+        $taskIds = array_map(fn ($t) => (int) $t->Id, $tasks);
+        $withImages = array_flip($this->tasksWithImages($taskIds));
+        $imported = Event::whereIn('source_ref', array_map(fn ($id) => 'adist3:'.$id, $taskIds))
+            ->pluck('source_ref')->map(fn ($r) => (int) Str::after($r, 'adist3:'))->flip()->all();
+
+        $out = [];
+        $matched = 0;
+        foreach ($tasks as $t) {
+            $id = (int) $t->Id;
+            $key = $this->nz($t->device);
+            $deviceId = null;
+            $status = 'no_device';
+
+            if (isset($imported[$id])) {
+                $status = 'imported';
+                $deviceId = optional(Event::where('source_ref', 'adist3:'.$id)->first())->device_id;
+            } elseif ($t->device && isset($byDid[$key]) && count($byDid[$key]) === 1) {
+                $status = 'matched';
+                $deviceId = $byDid[$key][0];
+                $matched++;
+            } elseif ($t->device) {
+                $status = 'unmatched'; // tiene código pero no empató (evento se crea sin dispositivo)
+            }
+
+            $out[] = [
+                'task_id'      => $id,
+                'device_code'  => $t->device,
+                'performed_at' => $t->ExecutionDate,
+                'assigned'     => $t->assigned,
+                'description'  => trim(strip_tags((string) $t->Description)),
+                'has_images'   => isset($withImages[$id]),
+                'status'       => $status,
+                'device_id'    => $deviceId,
+            ];
+        }
+
+        return [
+            'target' => 'event',
+            'event'  => [
+                'client'     => optional($site->client)->name,
+                'site'       => $site->name,
+                'event_type' => $eventType->label,
+            ],
+            'counts' => [
+                'total'    => count($tasks),
+                'matched'  => $matched,
+                'imported' => count($imported),
+            ],
+            'devices' => $devices->map(fn ($d) => [
+                'id'    => (int) $d->id,
+                'did'   => $d->did,
+                'tipo'  => $d->tipo,
+                'loc'   => $d->loc,
+                'label' => trim(($d->did ?: '¿?').' · '.($d->tipo ?: '—').($d->loc ? ' · '.$d->loc : '')),
+            ])->values()->all(),
+            'tasks' => $out,
+        ];
+    }
+
+    /**
+     * Crea/actualiza EVENTOS para las tareas de un IdRequest+tipo. Sitio/sistema/tipo de evento
+     * globales; dispositivo opcional (map override o auto-match DID). NO baja imágenes (Job).
+     * Idempotente por source_ref (folio solo al crear).
+     *
+     * @param  array<int,int>  $map  overrides {task_id => device_id}
+     * @return array{created:int, updated:int, pairs:array<int,array{task_id:int, event_id:int}>, supports_images:bool}
+     */
+    public function createEvents(string|int $requestId, string $sourceType, int $userId, int $siteId, int $systemId, int $eventTypeId, ?string $statusKey, array $map = []): array
+    {
+        $site = Site::with('client')->findOrFail($siteId);
+        $eventType = EventType::findOrFail($eventTypeId);
+        ['byDid' => $byDid] = $this->deviceIndex($siteId, $systemId);
+
+        $status = ($statusKey ? EventStatus::where('key', $statusKey)->first() : null)
+            ?? EventStatus::where('is_initial', true)->orderBy('sort_order')->first();
+        if (! $status) {
+            throw new \RuntimeException('No hay estados de evento configurados.');
+        }
+
+        $tasks = $this->fetchTasks($requestId, $sourceType);
+
+        $created = 0;
+        $updated = 0;
+        $pairs = [];
+
+        foreach ($tasks as $t) {
+            $id = (int) $t->Id;
+            $deviceId = $map[$id] ?? null;
+            if (! $deviceId && $t->device) {
+                $key = $this->nz($t->device);
+                if (isset($byDid[$key]) && count($byDid[$key]) === 1) {
+                    $deviceId = $byDid[$key][0];
+                }
+            }
+
+            $event = Event::firstOrNew(['source_ref' => 'adist3:'.$id]);
+            $isNew = ! $event->exists;
+            if ($isNew) {
+                $event->folio = EventFolio::next($site->client);
+            }
+            $event->fill([
+                'client_id'     => $site->client_id,
+                'site_id'       => $siteId,
+                'system_id'     => $systemId,
+                'event_type_id' => $eventTypeId,
+                'device_id'     => $deviceId,
+                'status_id'     => $status->id,
+                'priority'      => $eventType->default_priority ?: 'media',
+                'description'   => (trim(strip_tags((string) $t->Description)) ?: (string) $t->Title) ?: 'Importado de ADIST',
+                'occurred_at'   => $t->ExecutionDate,
+                'created_by'    => $userId,
+            ]);
+            $event->save();
+
+            if ($isNew) {
+                EventStatusHistory::create([
+                    'event_id'       => $event->id,
+                    'from_status_id' => null,
+                    'to_status_id'   => $status->id,
+                    'user_id'        => $userId,
+                    'note'           => 'Importado de ADIST',
+                    'created_at'     => now(),
+                ]);
+                $created++;
+            } else {
+                $updated++;
+            }
+
+            $pairs[] = ['task_id' => $id, 'event_id' => $event->id];
+        }
+
+        return ['created' => $created, 'updated' => $updated, 'pairs' => $pairs, 'supports_images' => true];
+    }
+
+    /** Descarga las imágenes de una tarea de ADIST y las mezcla en `events.images`. */
+    public function fillEventImages(Event $event, int $taskId): int
+    {
+        $our = $this->importImages($this->taskImageUrls($taskId));
+        if (! $our) {
+            return 0;
+        }
+        $imgs = is_array($event->images) ? $event->images : [];
+        $event->update(['images' => array_values(array_unique(array_merge($imgs, $our)))]);
+
+        return count($our);
     }
 
     /** URLs de imágenes (S3) de las notas de una tarea. */

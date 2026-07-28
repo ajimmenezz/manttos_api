@@ -510,6 +510,9 @@ class ToolRegistry
             // ── Reportes visuales descargables ────────────────────────────
             new CreateReportTool(),
 
+            // ── Ofrecer una acción como opción tras enseñar ("Hacerlo por mí") ──
+            new SuggestActionTool(),
+
             // ── Catálogos ─────────────────────────────────────────────────
             new ControllerTool(
                 name: 'catalogo_activo',

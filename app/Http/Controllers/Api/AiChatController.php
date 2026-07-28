@@ -160,6 +160,7 @@ class AiChatController extends Controller
                 'reply'           => $result['reply'],
                 'pending'         => $result['pending'],
                 'reports'         => $result['reports'] ?? [],
+                'suggestions'     => $result['suggestions'] ?? [],
                 'messages'        => $result['messages'],   // estado para reanudar
             ]);
         }
@@ -173,6 +174,7 @@ class AiChatController extends Controller
             'reply'           => $result['reply'],
             'actions'         => $result['actions'],
             'reports'         => $result['reports'] ?? [],
+            'suggestions'     => $result['suggestions'] ?? [],
             'usage'           => $result['usage'],
             'cost_usd'        => (float) $interaction->cost_usd,
             'duration_ms'     => $durationMs,
