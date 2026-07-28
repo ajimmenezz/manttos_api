@@ -974,6 +974,72 @@ class EventController extends Controller
         $statuses = EventStatus::where('is_active', true)->orderBy('sort_order')
             ->get(['id', 'key', 'label', 'color', 'is_initial', 'is_terminal', 'requires_form', 'requires_note']);
 
+        // ── Dispositivos del directorio por sitio × sistema (para elegir el dispositivo
+        //    asociado al evento OFFLINE, igual que la web pero cacheado). Incluye DID +
+        //    custom_fields para el buscador, el panel de datos del directorio y las
+        //    reglas source:'device'. Acotado a los sitios accesibles; sólo activos.
+        $siteClient = $sites->pluck('client_id', 'id'); // site_id => client_id
+
+        // Pares (sistema, cliente) presentes → DID key + defs del directorio (base + override).
+        $pairs = $dirRows->map(fn ($d) => [
+            'system_id' => (int) $d->catalog_id,
+            'client_id' => $siteClient->get($d->site_id) !== null ? (int) $siteClient->get($d->site_id) : null,
+        ])->unique(fn ($p) => $p['system_id'] . ':' . ($p['client_id'] ?? ''))->values();
+
+        $didKeyByPair = [];   // "sys:client" => didKey
+        $dirFieldsOut = [];   // [{ system_id, client_id, fields:[...] }]
+        foreach ($pairs as $p) {
+            $key = $p['system_id'] . ':' . ($p['client_id'] ?? '');
+            $didKeyByPair[$key] = $this->didKeyFor($p['system_id'], $p['client_id']);
+            $dirFieldsOut[] = [
+                'system_id' => $p['system_id'],
+                'client_id' => $p['client_id'],
+                'fields'    => $this->directoryFieldDefs($p['system_id'], $p['client_id']),
+            ];
+        }
+
+        $deviceRows = \App\Models\Device::whereHas('directory', fn ($d) =>
+                $d->whereIn('site_id', $siteIds)->where('is_active', true))
+            ->where('is_active', true)->whereNull('archived_at')
+            ->with('directory:id,site_id,catalog_id')
+            ->orderBy('name')
+            ->get(['id', 'directory_id', 'name', 'device_type', 'location', 'custom_fields']);
+
+        $devicesOut = $deviceRows->map(function ($d) use ($siteClient, $didKeyByPair) {
+            $siteId   = optional($d->directory)->site_id;
+            $systemId = optional($d->directory)->catalog_id;
+            if (! $siteId || ! $systemId) return null;
+            $clientId = $siteClient->get($siteId);
+            $didKey   = $didKeyByPair[$systemId . ':' . ($clientId ?? '')] ?? 'did';
+            $cf       = is_array($d->custom_fields) ? $d->custom_fields : [];
+            return [
+                'id'            => $d->id,
+                'site_id'       => (int) $siteId,
+                'system_id'     => (int) $systemId,
+                'name'          => $d->name,
+                'device_type'   => $d->device_type,
+                'location'      => $d->location,
+                'did'           => $cf[$didKey] ?? null,
+                'custom_fields' => (object) $cf,
+            ];
+        })->filter()->values();
+
+        // Contexto SLA por cliente (matriz Impacto×Urgencia → prioridad + qué prioridades
+        // "se programan"), para previsualizar la prioridad automática y pedir fecha
+        // programada sin conexión.
+        $slaOut = [];
+        foreach ($sites->pluck('client_id')->unique()->filter() as $clientId) {
+            $settings  = EventSla::resolve((int) $clientId);
+            $scheduled = [];
+            foreach (Event::PRIORITIES as $p) $scheduled[$p] = EventSla::isScheduled($p, $settings);
+            $slaOut[] = [
+                'client_id' => (int) $clientId,
+                'matrix'    => $settings['matrix'],
+                'scheduled' => $scheduled,
+                'enabled'   => (bool) ($settings['enabled'] ?? true),
+            ];
+        }
+
         return response()->json([
             'sites'             => $sitesOut,
             'systems'           => $systems,
@@ -981,6 +1047,11 @@ class EventController extends Controller
             'event_type_fields' => $fields,
             'catalog_options'   => $catalogOptions,
             'statuses'          => $statuses,
+            'devices'           => $devicesOut,
+            'directory_fields'  => $dirFieldsOut,
+            'sla'               => $slaOut,
+            'impacts'           => Event::IMPACTS,
+            'urgencies'         => Event::URGENCIES,
             'generated_at'      => now()->toISOString(),
         ]);
     }
