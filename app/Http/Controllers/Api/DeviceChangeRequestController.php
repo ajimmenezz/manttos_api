@@ -26,28 +26,53 @@ class DeviceChangeRequestController extends Controller
 {
     use ManagesDeviceData;
 
-    /** Solicitudes de un dispositivo (o de un evento). Visible para quien puede solicitar o aplicar. */
+    /**
+     * Solicitudes: por dispositivo/evento (para el panel del evento) o GLOBAL (cola de revisión).
+     * Quien puede aplicar ve todas; quien sólo solicita ve las SUYAS en la lista global.
+     */
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
         abort_unless(
-            $request->user()->can('devices.request-change') || $request->user()->can('devices.apply-change'),
+            $user->can('devices.request-change') || $user->can('devices.apply-change'),
             403, 'No autorizado para esta acción.'
         );
 
         $data = $request->validate([
             'device_id' => ['nullable', 'integer', 'exists:devices,id'],
             'event_id'  => ['nullable', 'integer', 'exists:events,id'],
+            'status'    => ['nullable', 'in:pending,applied,rejected,all'],
         ]);
-        abort_if(empty($data['device_id']) && empty($data['event_id']), 422, 'Indica el dispositivo o el evento.');
 
-        $rows = DeviceChangeRequest::with(['requester:id,name', 'reviewer:id,name'])
+        $canApply = $user->can('devices.apply-change');
+        $scoped = ! empty($data['device_id']) || ! empty($data['event_id']);
+
+        $rows = DeviceChangeRequest::with([
+                'requester:id,name', 'reviewer:id,name',
+                'device:id,name,directory_id',
+                'device.directory:id,site_id,catalog_id',
+                'device.directory.site:id,name,client_id',
+                'device.directory.site.client:id,name',
+                'device.directory.system:id,label',
+            ])
             ->when(! empty($data['device_id']), fn ($q) => $q->where('device_id', $data['device_id']))
             ->when(! empty($data['event_id']), fn ($q) => $q->where('event_id', $data['event_id']))
+            ->when(! empty($data['status']) && $data['status'] !== 'all', fn ($q) => $q->where('status', $data['status']))
+            // En la lista GLOBAL, quien sólo puede solicitar ve únicamente sus propias solicitudes.
+            ->when(! $canApply && ! $scoped, fn ($q) => $q->where('requested_by', $user->id))
+            ->orderByRaw("case when status = 'pending' then 0 else 1 end")
             ->orderByDesc('id')
+            ->limit(300)
             ->get()
             ->map(fn (DeviceChangeRequest $r) => $this->present($r));
 
-        return response()->json(['data' => $rows, 'can_apply' => $request->user()->can('devices.apply-change')]);
+        return response()->json([
+            'data'      => $rows,
+            'can_apply' => $canApply,
+            'pending'   => DeviceChangeRequest::where('status', 'pending')
+                ->when(! $canApply, fn ($q) => $q->where('requested_by', $user->id))
+                ->count(),
+        ]);
     }
 
     /** Registra una solicitud de cambio (no aplica nada). */
@@ -88,6 +113,9 @@ class DeviceChangeRequestController extends Controller
                 'field_type' => $defs[$key]['field_type'],
                 'old'        => $old,
                 'new'        => $new,
+                // Etiqueta legible al momento de solicitar (auditoría autocontenida, resuelve listas).
+                'old_label'  => $this->displayVal($defs[$key], $old),
+                'new_label'  => $this->displayVal($defs[$key], $new),
             ];
         }
 
@@ -173,12 +201,41 @@ class DeviceChangeRequestController extends Controller
                 fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)),
                 fn ($q) => $q->whereNull('client_id'))
             ->orderBy('sort_order')->orderBy('id')
-            ->get(['client_id', 'field_key', 'label', 'field_type']);
+            ->get(['client_id', 'field_key', 'label', 'field_type', 'config']);
 
         return $rows->sortBy(fn ($f) => $f->client_id === null ? 0 : 1)
             ->keyBy('field_key')
-            ->map(fn ($f) => ['label' => $f->label, 'field_type' => $f->field_type])
+            ->map(fn ($f) => ['label' => $f->label, 'field_type' => $f->field_type, 'config' => $f->config])
             ->all();
+    }
+
+    /** Valor legible de un campo (resuelve listas personalizadas valor→etiqueta, booleanos). */
+    private function displayVal(array $def, $v): string
+    {
+        if ($v === null || $v === '') {
+            return '—';
+        }
+        $type = $def['field_type'] ?? 'text';
+        if (in_array($type, ['custom_list', 'custom_multiselect'], true)) {
+            $options = is_array($def['config'] ?? null) ? ($def['config']['options'] ?? []) : [];
+            $map = [];
+            foreach ($options as $o) {
+                if (isset($o['value'])) {
+                    $map[(string) $o['value']] = $o['label'] ?? $o['value'];
+                }
+            }
+            $vals = is_array($v) ? $v : [$v];
+
+            return implode(', ', array_map(fn ($x) => $map[(string) $x] ?? (string) $x, $vals));
+        }
+        if (is_bool($v)) {
+            return $v ? 'Sí' : 'No';
+        }
+        if (is_array($v)) {
+            return implode(', ', array_map('strval', $v));
+        }
+
+        return (string) $v;
     }
 
     /** Normaliza un valor para comparar "antes vs después" (evita cambios falsos por tipo). */
@@ -200,10 +257,17 @@ class DeviceChangeRequestController extends Controller
     /** Forma de salida para la interfaz. */
     private function present(DeviceChangeRequest $r): array
     {
+        $device = $r->relationLoaded('device') ? $r->device : null;
+        $dir = $device ? $device->directory : null;
+
         return [
             'id'          => $r->id,
             'device_id'   => $r->device_id,
             'event_id'    => $r->event_id,
+            'device_name'  => optional($device)->name,
+            'site_name'    => optional(optional($dir)->site)->name,
+            'client_name'  => optional(optional(optional($dir)->site)->client)->name,
+            'system_label' => optional(optional($dir)->system)->label,
             'changes'     => $r->changes,
             'note'        => $r->note,
             'status'      => $r->status,
