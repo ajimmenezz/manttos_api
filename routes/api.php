@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\DeviceController;
 use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\MaintenanceController;
 use App\Http\Controllers\Api\DeviceImportExportController;
+use App\Http\Controllers\Api\DeviceChangeRequestController;
 use App\Http\Controllers\Api\DirectoryAnalyzerController;
 use App\Http\Controllers\Api\DirectoryController;
 use App\Http\Controllers\Api\EventCommentController;
@@ -263,6 +264,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/directories', [DirectoryController::class, 'all']);
 
     // Analista de Directorio (limpieza de valores del directorio con IA opcional + Excel)
+    // Solicitudes de cambio a los datos del directorio de un dispositivo (desde un evento)
+    Route::get( '/device-change-requests',        [DeviceChangeRequestController::class, 'index']);
+    Route::post('/device-change-requests',        [DeviceChangeRequestController::class, 'store']);
+    Route::post('/device-change-requests/{deviceChangeRequest}/apply',  [DeviceChangeRequestController::class, 'apply']);
+    Route::post('/device-change-requests/{deviceChangeRequest}/reject', [DeviceChangeRequestController::class, 'reject']);
+
     Route::get( '/directories/{directory}/analyzer/fields',  [DirectoryAnalyzerController::class, 'fields']);
     Route::post('/directories/{directory}/analyzer/analyze', [DirectoryAnalyzerController::class, 'analyze']);
     Route::post('/directories/{directory}/analyzer/apply',   [DirectoryAnalyzerController::class, 'apply']);

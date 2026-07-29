@@ -79,6 +79,7 @@ class RoleSeeder extends Seeder
             'floor-plans.view',
             'maintenances.view', 'maintenances.record-activity', 'maintenances.schedule-devices',
             'events.view', 'events.create', 'events.fill-form', 'events.change-status', 'events.comment',
+            'devices.request-change',
             'chat.use', 'chat.group-manage',
         ]);
 
@@ -90,12 +91,14 @@ class RoleSeeder extends Seeder
         ]);
 
         // Admin: todos los permisos excepto config.manage (superadmin), los *.archive
-        // (superadmin-only por defecto, grantables) y las integraciones (credenciales
-        // de plataforma, superadmin-only).
+        // (superadmin-only por defecto, grantables), aplicar cambios de dispositivo
+        // (controlado, superadmin/coordinador) y las integraciones (credenciales de
+        // plataforma, superadmin-only).
         $admin = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
         $admin->syncPermissions(
             Permission::where('guard_name', 'web')
                 ->where('name', '!=', 'config.manage')
+                ->where('name', '!=', 'devices.apply-change')
                 ->where('name', 'not like', '%.archive')
                 ->where('name', 'not like', 'integrations.%')
                 ->get()

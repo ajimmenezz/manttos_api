@@ -84,6 +84,8 @@ class PermissionSeeder extends Seeder
         'devices.import',
         'devices.export',
         'devices.archive',              // vaciar directorio / restaurar (reversible)
+        'devices.request-change',       // solicitar cambio a los datos del directorio (no aplica)
+        'devices.apply-change',         // aprobar y aplicar el cambio solicitado
 
         // ── Planos del sitio ────────────────────────────────────────
         'floor-plans.view',
