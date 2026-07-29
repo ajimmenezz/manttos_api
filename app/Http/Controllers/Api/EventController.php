@@ -847,7 +847,7 @@ class EventController extends Controller
                 fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)),
                 fn ($q) => $q->whereNull('client_id'))
             ->orderBy('sort_order')->orderBy('id')
-            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'config', 'sort_order']);
+            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'config', 'sort_order', 'show_in_service_sheet']);
 
         // El override por cliente (client_id) gana sobre el base (client_id null) con la misma clave.
         return $rows->sortBy(fn ($f) => $f->client_id === null ? 0 : 1)
@@ -858,6 +858,7 @@ class EventController extends Controller
                 'label'      => $f->label,
                 'field_type' => $f->field_type,
                 'config'     => $f->config,
+                'show_in_service_sheet' => (bool) $f->show_in_service_sheet,
             ])->values()->all();
     }
 

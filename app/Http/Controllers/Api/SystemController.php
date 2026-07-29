@@ -635,6 +635,20 @@ class SystemController extends Controller
         return response()->json(['message' => "Campo {$status} reporte de eventos.", 'field' => $field]);
     }
 
+    /** Marca/desmarca el campo del directorio para imprimirse en la hoja de servicio. */
+    public function toggleServiceSheet(int $id, SystemField $field): JsonResponse
+    {
+        abort_unless(auth()->user()->can('system-config.manage'), 403, 'No autorizado para esta acción.');
+
+        $system = $this->resolveSystem($id);
+        abort_unless($field->catalog_id === $system->id, 404);
+
+        $field->update(['show_in_service_sheet' => ! $field->show_in_service_sheet]);
+        $status = $field->show_in_service_sheet ? 'incluido en' : 'excluido de';
+
+        return response()->json(['message' => "Campo {$status} la hoja de servicio.", 'field' => $field]);
+    }
+
     public function fieldImpact(int $id, SystemField $field): JsonResponse
     {
         abort_unless(auth()->user()->can('system-config.view'), 403, 'No autorizado para esta acción.');

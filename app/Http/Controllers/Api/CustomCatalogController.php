@@ -6,6 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\CustomCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Catálogos/listas REUTILIZABLES del usuario (para el campo "Lista personalizada").
@@ -117,6 +122,62 @@ class CustomCatalogController extends Controller
         $customCatalog->delete();
 
         return response()->json(['message' => 'Catálogo eliminado.']);
+    }
+
+    /** Descarga una plantilla Excel (Etiqueta, Valor) para capturar opciones y luego importarlas. */
+    public function optionsTemplate(): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Opciones');
+        $sheet->setCellValue('A1', 'Etiqueta');
+        $sheet->setCellValue('B1', 'Valor');
+        $sheet->getStyle('A1:B1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:B1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EEF2FF');
+        // Ejemplos (el usuario los reemplaza). Si el Valor se deja vacío, se usa la Etiqueta.
+        $sheet->setCellValueExplicit('A2', 'Detector de humo', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $sheet->setCellValueExplicit('B2', 'DH-01', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $sheet->setCellValueExplicit('A3', 'Estación manual', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $sheet->setCellValueExplicit('B3', 'EM-02', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $sheet->getColumnDimension('A')->setAutoSize(true);
+        $sheet->getColumnDimension('B')->setAutoSize(true);
+
+        return response()->streamDownload(function () use ($spreadsheet) {
+            (new Xlsx($spreadsheet))->save('php://output');
+        }, 'plantilla-opciones-lista.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
+    /**
+     * Parsea un Excel (columnas Etiqueta / Valor) y devuelve las opciones [{label,value}]
+     * para llenar el editor. Solo transforma el archivo (no toca datos). Valor vacío → Etiqueta.
+     */
+    public function parseOptions(Request $request): JsonResponse
+    {
+        $request->validate(['file' => 'required|file|mimes:xlsx,xls,csv,txt|max:5120']);
+
+        $sheet = IOFactory::load($request->file('file')->getRealPath())->getActiveSheet();
+
+        // Detecta si la primera fila es encabezado ("etiqueta"/"valor").
+        $firstA = mb_strtolower(trim((string) $sheet->getCell('A1')->getValue()));
+        $start = in_array($firstA, ['etiqueta', 'label', 'nombre'], true) ? 2 : 1;
+
+        $out = [];
+        $seen = [];
+        foreach ($sheet->getRowIterator($start) as $row) {
+            $i = $row->getRowIndex();
+            $label = trim((string) $sheet->getCell("A{$i}")->getValue());
+            $value = trim((string) $sheet->getCell("B{$i}")->getValue());
+            if ($label === '' && $value === '') continue;
+            $value = $value !== '' ? $value : $label;
+            $label = $label !== '' ? $label : $value;
+            if (isset($seen[$value])) continue;
+            $seen[$value] = true;
+            $out[] = ['label' => mb_substr($label, 0, 200), 'value' => mb_substr($value, 0, 200)];
+        }
+
+        return response()->json(['options' => $out, 'count' => count($out)]);
     }
 
     private function validateData(Request $request): array

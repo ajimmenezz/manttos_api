@@ -220,6 +220,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Importación desde ADIST3 (sistema anterior). Superadmin-only (integrations.import-external).
     Route::get('/developer/imports/adist/options',  [AdistImportController::class, 'options']);
+    Route::post('/developer/imports/adist/task-types', [AdistImportController::class, 'taskTypes']);
     Route::post('/developer/imports/adist/preview', [AdistImportController::class, 'preview']);
     Route::post('/developer/imports/adist/task',    [AdistImportController::class, 'task']);
     Route::post('/developer/imports/adist/commit',  [AdistImportController::class, 'commit']);
@@ -312,6 +313,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Catálogos/listas REUTILIZABLES del usuario (campo "Lista personalizada").
     Route::get('/custom-catalogs',          [CustomCatalogController::class, 'index']);
     Route::get('/custom-catalogs/options',  [CustomCatalogController::class, 'forFields']); // antes del wildcard
+    Route::get('/custom-catalogs/options-template', [CustomCatalogController::class, 'optionsTemplate']);
+    Route::post('/custom-catalogs/parse-options',   [CustomCatalogController::class, 'parseOptions']);
     Route::post('/custom-catalogs',         [CustomCatalogController::class, 'store']);
     Route::put('/custom-catalogs/{customCatalog}',  [CustomCatalogController::class, 'update']);
     Route::post('/custom-catalogs/{customCatalog}/toggle-status', [CustomCatalogController::class, 'toggleStatus']);
@@ -341,6 +344,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/fields/{field}/toggle-dashboard', [SystemController::class, 'toggleDashboard']);
         Route::post('/fields/{field}/toggle-bitacora',  [SystemController::class, 'toggleBitacora']);
         Route::post('/fields/{field}/toggle-event-report', [SystemController::class, 'toggleEventReport']);
+        Route::post('/fields/{field}/toggle-service-sheet', [SystemController::class, 'toggleServiceSheet']);
         Route::delete('/fields/{field}',                [SystemController::class, 'destroyField']);
     });
 
@@ -421,6 +425,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/fields/{field}',               [EventTypeController::class, 'updateField']);
         Route::post('/fields/{field}/toggle-status', [EventTypeController::class, 'toggleField']);
         Route::post('/fields/{field}/toggle-report', [EventTypeController::class, 'toggleReport']);
+        Route::post('/fields/{field}/toggle-service-sheet', [EventTypeController::class, 'toggleServiceSheet']);
         Route::delete('/fields/{field}',            [EventTypeController::class, 'destroyField']);
         Route::post('/link',                        [EventTypeController::class, 'linkSystem']);
         Route::delete('/link',                      [EventTypeController::class, 'unlinkSystem']);

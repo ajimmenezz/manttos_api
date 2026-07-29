@@ -45,16 +45,19 @@ class ServiceSheetRenderer
             ->orderBy('sort_order')->orderBy('id')
             ->get();
 
-        $formFields = $fields->filter(fn ($f) => ! in_array($f->field_type, ['leyenda', 'signature'], true))->values();
+        // Solo los campos marcados para la hoja de servicio (default true); nunca los de IA.
+        $formFields = $fields
+            ->filter(fn ($f) => ! in_array($f->field_type, ['leyenda', 'signature'], true) && $f->show_in_service_sheet !== false)
+            ->values();
         $signatureFields = $fields->filter(fn ($f) => $f->field_type === 'signature')->values();
 
-        // Campos del directorio (base + override por cliente) + clave del DID. Se muestran TODOS
-        // (aunque estén vacíos → '—'), excepto el DID que va aparte.
+        // Campos del directorio (base + override por cliente) + clave del DID. Se muestran los
+        // marcados para la hoja (aunque estén vacíos → '—'), excepto el DID que va aparte.
         $dirFields = $this->directoryFieldDefs($event->system_id, $event->client_id);
         $didKey = collect($dirFields)->firstWhere('field_type', 'did')['field_key'] ?? 'did';
         $cf = is_array($event->device?->custom_fields) ? $event->device->custom_fields : [];
         $dirEntries = collect($dirFields)
-            ->filter(fn ($f) => $f['field_key'] !== $didKey)
+            ->filter(fn ($f) => $f['field_key'] !== $didKey && ($f['show_in_service_sheet'] ?? true))
             ->map(fn ($f) => ['label' => $f['label'], 'value' => $this->renderFieldValue($cf[$f['field_key']] ?? null, $f)])
             ->values()->all();
 
@@ -141,13 +144,15 @@ class ServiceSheetRenderer
                 fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)),
                 fn ($q) => $q->whereNull('client_id'))
             ->orderBy('sort_order')->orderBy('id')
-            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'config', 'sort_order']);
+            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'config', 'sort_order', 'show_in_service_sheet']);
 
         return $rows->sortBy(fn ($f) => $f->client_id === null ? 0 : 1)
             ->keyBy('field_key')
             ->sortBy('sort_order')
-            ->map(fn ($f) => ['field_key' => $f->field_key, 'label' => $f->label, 'field_type' => $f->field_type, 'config' => $f->config])
-            ->values()->all();
+            ->map(fn ($f) => [
+                'field_key' => $f->field_key, 'label' => $f->label, 'field_type' => $f->field_type,
+                'config' => $f->config, 'show_in_service_sheet' => (bool) $f->show_in_service_sheet,
+            ])->values()->all();
     }
 
     /**

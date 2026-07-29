@@ -193,6 +193,19 @@ class AdistImportService
         ])->values()->all();
     }
 
+    /** Tipos de tarea DISTINTOS de un IdRequest (para el desplegable), con su conteo. */
+    public function taskTypes(string|int $requestId): array
+    {
+        return DB::connection('pruebas')->select("
+            SELECT ty.Name AS name, COUNT(*) AS n
+            FROM t_maintenance_tasks t
+            JOIN cat_maintenance_tasks_type ty ON ty.Id = t.IdTaskType
+            WHERE t.IdRequest = ?
+            GROUP BY ty.Name
+            ORDER BY ty.Name
+        ", [$requestId]);
+    }
+
     /** Trae las tareas de un IdRequest + tipo desde ADIST3 (con su `device` y quién la ejecutó). */
     public function fetchTasks(string|int $requestId, string $type): array
     {
@@ -415,10 +428,11 @@ class AdistImportService
      * @param  array<int,int>  $map
      * @return array{created: int, pairs: array<int,array{task_id:int, activity_id:int}>, skipped: int, imgKeys: array<int,string>, supports_images: bool}
      */
-    public function createActivities(Maintenance $maintenance, string|int $requestId, string $type, int $userId, array $map, ?int $destActivityTypeId = null): array
+    public function createActivities(Maintenance $maintenance, string|int $requestId, string $type, int $userId, array $map, ?int $destActivityTypeId = null, ?array $onlyTaskIds = null): array
     {
         $ctx = $this->resolveContext($maintenance, $type, $destActivityTypeId);
         $tasks = $this->fetchTasks($requestId, $type);
+        $onlySet = $onlyTaskIds !== null ? array_flip(array_map('intval', $onlyTaskIds)) : null;
 
         $created = 0;
         $skipped = 0;
@@ -426,6 +440,9 @@ class AdistImportService
 
         foreach ($tasks as $t) {
             $id = (int) $t->Id;
+            if ($onlySet !== null && ! isset($onlySet[$id])) {
+                continue;
+            }
             $deviceId = $map[$id] ?? null;
             if (! $deviceId) {
                 $skipped++;
@@ -545,19 +562,23 @@ class AdistImportService
      * @param  array<int,int>  $map  overrides {task_id => device_id}
      * @return array{created:int, updated:int, pairs:array<int,array{task_id:int, event_id:int}>, supports_images:bool}
      */
-    public function createEvents(string|int $requestId, string $sourceType, int $userId, int $siteId, int $systemId, int $eventTypeId, ?string $statusKey, array $map = []): array
+    public function createEvents(string|int $requestId, string $sourceType, int $userId, int $siteId, int $systemId, int $eventTypeId, ?string $statusKey, array $map = [], array $statusMap = [], ?array $onlyTaskIds = null): array
     {
         $site = Site::with('client')->findOrFail($siteId);
         $eventType = EventType::findOrFail($eventTypeId);
         ['byDid' => $byDid] = $this->deviceIndex($siteId, $systemId, $site->client_id);
 
-        $status = ($statusKey ? EventStatus::where('key', $statusKey)->first() : null)
+        // Estado por defecto de la corrida + índice key→id para el estado POR evento.
+        $defaultStatus = ($statusKey ? EventStatus::where('key', $statusKey)->first() : null)
             ?? EventStatus::where('is_initial', true)->orderBy('sort_order')->first();
-        if (! $status) {
+        if (! $defaultStatus) {
             throw new \RuntimeException('No hay estados de evento configurados.');
         }
+        $defaultStatusId = (int) $defaultStatus->id;
+        $statusIdByKey = EventStatus::pluck('id', 'key'); // key => id
 
         $tasks = $this->fetchTasks($requestId, $sourceType);
+        $onlySet = $onlyTaskIds !== null ? array_flip(array_map('intval', $onlyTaskIds)) : null;
 
         $created = 0;
         $updated = 0;
@@ -565,6 +586,15 @@ class AdistImportService
 
         foreach ($tasks as $t) {
             $id = (int) $t->Id;
+            if ($onlySet !== null && ! isset($onlySet[$id])) {
+                continue;
+            }
+            // Estado elegido para ESTE evento (override por fila); si no, el de la corrida.
+            $statusId = $defaultStatusId;
+            $rowKey = $statusMap[$id] ?? null;
+            if ($rowKey && isset($statusIdByKey[$rowKey])) {
+                $statusId = (int) $statusIdByKey[$rowKey];
+            }
             $deviceId = $map[$id] ?? null;
             if (! $deviceId && $t->device) {
                 $key = $this->nz($t->device);
@@ -584,7 +614,7 @@ class AdistImportService
                 'system_id'     => $systemId,
                 'event_type_id' => $eventTypeId,
                 'device_id'     => $deviceId,
-                'status_id'     => $status->id,
+                'status_id'     => $statusId,
                 'priority'      => $eventType->default_priority ?: 'media',
                 'description'   => (trim(strip_tags((string) $t->Description)) ?: (string) $t->Title) ?: 'Importado de ADIST',
                 'occurred_at'   => $t->ExecutionDate,
@@ -596,7 +626,7 @@ class AdistImportService
                 EventStatusHistory::create([
                     'event_id'       => $event->id,
                     'from_status_id' => null,
-                    'to_status_id'   => $status->id,
+                    'to_status_id'   => $statusId,
                     'user_id'        => $userId,
                     'note'           => 'Importado de ADIST',
                     'created_at'     => now(),

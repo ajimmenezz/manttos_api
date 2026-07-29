@@ -40,7 +40,10 @@ class AdistImportController extends Controller
     {
         $this->authorizeImport($request);
 
+        // Solo mantenimientos NO cancelados, no archivados, de sitios activos con cliente no archivado.
         $maintenances = Maintenance::visible()
+            ->where('status', '!=', 'cancelado')
+            ->whereHas('site', fn ($q) => $q->where('is_active', true)->whereHas('client'))
             ->with(['site.client', 'system'])
             ->orderByDesc('id')
             ->get()
@@ -68,8 +71,8 @@ class AdistImportController extends Controller
             ->where('is_active', true)->orderBy('label')->get(['id', 'label'])
             ->map(fn ($c) => ['id' => $c->id, 'label' => $c->label]);
 
-        // Destino EVENTO: sitios, sistemas, tipos de evento y estados (globales de la corrida).
-        $sites = Site::where('is_active', true)->with('client:id,name')->orderBy('name')
+        // Destino EVENTO: sitios ACTIVOS de clientes NO archivados (whereHas excluye soft-deleted).
+        $sites = Site::where('is_active', true)->whereHas('client')->with('client:id,name')->orderBy('name')
             ->get(['id', 'name', 'client_id'])
             ->map(fn (Site $s) => [
                 'id'        => $s->id,
@@ -160,6 +163,26 @@ class AdistImportController extends Controller
         }
     }
 
+    /** Tipos de tarea DISTINTOS de un IdRequest (para el desplegable de origen). */
+    public function taskTypes(Request $request): JsonResponse
+    {
+        $this->authorizeImport($request);
+
+        $data = $request->validate(['request_id' => ['required']]);
+
+        try {
+            $types = $this->service->taskTypes($data['request_id']);
+
+            return response()->json([
+                'types' => array_map(fn ($t) => ['name' => $t->name, 'count' => (int) $t->n], $types),
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json(['message' => 'No se pudieron consultar los tipos de tarea en ADIST.'], 502);
+        }
+    }
+
     /** Detalle completo de una tarea de ADIST (para el drawer). */
     public function task(Request $request): JsonResponse
     {
@@ -201,6 +224,11 @@ class AdistImportController extends Controller
             'system_id'      => ['nullable', 'integer', 'exists:catalogs,id'],
             'event_type_id'  => ['nullable', 'integer', 'exists:event_types,id'],
             'event_status_key' => ['nullable', 'string', 'max:60'],
+            // Estado POR evento (override de la corrida) y subconjunto de tareas a importar (fila/bloque).
+            'statuses'       => ['nullable', 'array'],
+            'statuses.*'     => ['nullable', 'string', 'max:60'],
+            'task_ids'       => ['nullable', 'array'],
+            'task_ids.*'     => ['integer'],
         ]);
 
         $target = $data['target'] ?? 'activity';
@@ -215,6 +243,15 @@ class AdistImportController extends Controller
             }
         }
 
+        // Estado por evento { taskId: statusKey } y subconjunto de tareas a importar.
+        $statusMap = [];
+        foreach (($data['statuses'] ?? []) as $taskId => $key) {
+            if ($key) {
+                $statusMap[(int) $taskId] = (string) $key;
+            }
+        }
+        $onlyTaskIds = isset($data['task_ids']) ? array_map('intval', $data['task_ids']) : null;
+
         try {
             if ($target === 'event') {
                 $request->validate([
@@ -226,7 +263,7 @@ class AdistImportController extends Controller
                 $result = $this->service->createEvents(
                     $data['request_id'], $type, $userId,
                     (int) $data['site_id'], (int) $data['system_id'], (int) $data['event_type_id'],
-                    $data['event_status_key'] ?? null, $map,
+                    $data['event_status_key'] ?? null, $map, $statusMap, $onlyTaskIds,
                 );
 
                 $queuedImages = false;
@@ -256,6 +293,7 @@ class AdistImportController extends Controller
             $result = $this->service->createActivities(
                 $maintenance, $data['request_id'], $type, $userId, $map,
                 isset($data['dest_activity_type_id']) ? (int) $data['dest_activity_type_id'] : null,
+                $onlyTaskIds,
             );
         } catch (\Illuminate\Validation\ValidationException $e) {
             throw $e;

@@ -200,6 +200,15 @@ class EventTypeController extends Controller
         return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
     }
 
+    /** Marca/desmarca el campo para imprimirse en la hoja de servicio. */
+    public function toggleServiceSheet(EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
+    {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
+        $field->update(['show_in_service_sheet' => ! $field->show_in_service_sheet]);
+        return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
+    }
+
     public function reorderFields(Request $request, EventType $eventType, int $systemId): JsonResponse
     {
         abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');

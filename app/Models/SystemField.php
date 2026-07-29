@@ -26,6 +26,7 @@ class SystemField extends Model
         'show_in_dashboard',
         'show_in_bitacora',
         'show_in_event_report',
+        'show_in_service_sheet',
         'created_by',
     ];
 
@@ -37,6 +38,7 @@ class SystemField extends Model
             'show_in_dashboard'    => 'boolean',
             'show_in_bitacora'     => 'boolean',
             'show_in_event_report' => 'boolean',
+            'show_in_service_sheet' => 'boolean',
             'max_length'           => 'integer',
             'sort_order'        => 'integer',
         ];
