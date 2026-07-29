@@ -20,6 +20,9 @@
   .val { font-size: 11px; font-weight: bold; margin-top: 1px; }
   .desc { font-size: 11px; white-space: pre-wrap; margin-top: 2px; }
   .thumb { height: 54px; margin: 2px 3px 0 0; border: 1px solid #d1d5db; }
+  table.photos { width: 100%; border-collapse: separate; border-spacing: 4px; }
+  table.photos td { width: 25%; vertical-align: top; padding: 0; }
+  table.photos img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #d1d5db; }
   table.hist { width: 100%; border-collapse: collapse; }
   table.hist td { padding: 3px 4px; border-bottom: 1px solid #eceef1; vertical-align: top; }
   .note { color: #4b5563; font-size: 10px; }
@@ -128,6 +131,18 @@
               @endif
             </td>
           @endforeach
+        </tr>
+      @endforeach
+    </table>
+  @endif
+
+  @if(count($photos))
+    <h2>Evidencia fotográfica</h2>
+    <table class="photos">
+      @foreach(array_chunk($photos, 4) as $row)
+        <tr>
+          @foreach($row as $img)<td>@if($img)<img src="{{ $img }}">@endif</td>@endforeach
+          @for($i = count($row); $i < 4; $i++)<td></td>@endfor
         </tr>
       @endforeach
     </table>

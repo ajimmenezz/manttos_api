@@ -48,20 +48,29 @@ class ServiceSheetRenderer
         $formFields = $fields->filter(fn ($f) => ! in_array($f->field_type, ['leyenda', 'signature'], true))->values();
         $signatureFields = $fields->filter(fn ($f) => $f->field_type === 'signature')->values();
 
-        // Campos del directorio (base + override por cliente) + clave del DID.
+        // Campos del directorio (base + override por cliente) + clave del DID. Se muestran TODOS
+        // (aunque estén vacíos → '—'), excepto el DID que va aparte.
         $dirFields = $this->directoryFieldDefs($event->system_id, $event->client_id);
         $didKey = collect($dirFields)->firstWhere('field_type', 'did')['field_key'] ?? 'did';
         $cf = is_array($event->device?->custom_fields) ? $event->device->custom_fields : [];
         $dirEntries = collect($dirFields)
-            ->filter(fn ($f) => $f['field_key'] !== $didKey && ($cf[$f['field_key']] ?? null) !== null && ($cf[$f['field_key']] ?? '') !== '')
-            ->map(fn ($f) => ['label' => $f['label'], 'value' => $this->renderValue($cf[$f['field_key']] ?? null)])
+            ->filter(fn ($f) => $f['field_key'] !== $didKey)
+            ->map(fn ($f) => ['label' => $f['label'], 'value' => $this->renderFieldValue($cf[$f['field_key']] ?? null, $f)])
             ->values()->all();
 
         $values = is_array($event->field_values) ? $event->field_values : [];
         $formRows = $formFields->map(fn ($f) => [
             'label' => $f->label,
-            'value' => $this->renderValue($values[$f->field_key] ?? null),
+            'value' => $this->renderFieldValue($values[$f->field_key] ?? null, [
+                'field_type' => $f->field_type, 'config' => $f->config,
+            ]),
         ])->all();
+
+        // Evidencia fotográfica: las "Fotos del evento" (event.images), incrustadas como data-URI.
+        $photos = collect(is_array($event->images) ? $event->images : [])
+            ->filter(fn ($u) => $this->isImageUrl($u))
+            ->map(fn ($u) => $this->dataUri($u))
+            ->filter()->values()->all();
 
         $signatures = $signatureFields->map(function ($f) use ($values) {
             $v = $values[$f->field_key] ?? null;
@@ -115,6 +124,7 @@ class ServiceSheetRenderer
             ] : null,
             'dirEntries' => $dirEntries,
             'formRows'   => $formRows,
+            'photos'     => $photos,
             'history'    => $history,
             'comments'   => $comments,
             'signatures' => $signatures,
@@ -131,13 +141,42 @@ class ServiceSheetRenderer
                 fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)),
                 fn ($q) => $q->whereNull('client_id'))
             ->orderBy('sort_order')->orderBy('id')
-            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'sort_order']);
+            ->get(['id', 'client_id', 'field_key', 'label', 'field_type', 'config', 'sort_order']);
 
         return $rows->sortBy(fn ($f) => $f->client_id === null ? 0 : 1)
             ->keyBy('field_key')
             ->sortBy('sort_order')
-            ->map(fn ($f) => ['field_key' => $f->field_key, 'label' => $f->label, 'field_type' => $f->field_type])
+            ->map(fn ($f) => ['field_key' => $f->field_key, 'label' => $f->label, 'field_type' => $f->field_type, 'config' => $f->config])
             ->values()->all();
+    }
+
+    /**
+     * Valor legible de un campo. Para "Lista personalizada" (custom_list/custom_multiselect)
+     * traduce el valor guardado a su etiqueta usando las opciones del `config` (que el modelo
+     * ya resuelve, incluso si la lista es un catálogo reutilizable). El resto va por renderValue.
+     */
+    private function renderFieldValue($v, array|object $field): array|string
+    {
+        $type   = is_object($field) ? ($field->field_type ?? null) : ($field['field_type'] ?? null);
+        $config = is_object($field) ? ($field->config ?? []) : ($field['config'] ?? []);
+
+        if (in_array($type, ['custom_list', 'custom_multiselect'], true)) {
+            $options = is_array($config) ? ($config['options'] ?? []) : [];
+            $map = [];
+            foreach ($options as $o) {
+                if (isset($o['value'])) {
+                    $map[(string) $o['value']] = $o['label'] ?? $o['value'];
+                }
+            }
+            $vals = is_array($v) ? $v : ($v === null || $v === '' ? [] : [$v]);
+            if (! $vals) {
+                return '—';
+            }
+
+            return implode(', ', array_map(fn ($x) => $map[(string) $x] ?? (string) $x, $vals));
+        }
+
+        return $this->renderValue($v);
     }
 
     /** Valor legible; si es imagen(es), devuelve arreglo de data-URIs para incrustar. */
