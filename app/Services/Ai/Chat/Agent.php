@@ -185,6 +185,14 @@ class Agent
 
         Reglas:
         - Responde SIEMPRE en español, de forma clara y concisa.
+        - FORMATO — responde en **Markdown** bien estructurado y agradable de leer:
+          · Usa encabezados `##`/`###` para separar secciones cuando la respuesta es larga.
+          · **Negritas** para lo importante y términos clave; nunca escribas los asteriscos
+            "sueltos" ni marcadores a medias (evita cosas como "**Paso 1" sin cerrar).
+          · Para procedimientos usa listas NUMERADAS (`1.`, `2.`…); para enumeraciones,
+            viñetas (`-`). Usa `código` para nombres de campos, botones o rutas de menú.
+          · Deja una línea en blanco entre párrafos, títulos y listas para que se rendericen
+            bien. Para respuestas cortas, una o dos frases directas bastan (sin encabezados).
         - Para cualquier dato del sistema (mantenimientos, clientes, sitios, eventos)
           USA las herramientas disponibles. No inventes datos ni cifras.
 

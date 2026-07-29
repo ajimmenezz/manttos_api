@@ -173,7 +173,13 @@ class ClientSystemFieldController extends Controller
         if (($data['field_type'] ?? null) !== 'custom_list') {
             return null;
         }
-        $opts = collect($data['config']['options'] ?? [])
+        $cfg = $data['config'] ?? [];
+        // Origen "catálogo": guarda solo la referencia (opciones resueltas al leer).
+        if (($cfg['source'] ?? 'inline') === 'catalog') {
+            abort_if(empty($cfg['custom_catalog_id']), 422, 'Elige un catálogo para la lista personalizada.');
+            return ['source' => 'catalog', 'custom_catalog_id' => (int) $cfg['custom_catalog_id']];
+        }
+        $opts = collect($cfg['options'] ?? [])
             ->map(fn ($o) => [
                 'label' => trim((string) ($o['label'] ?? '')),
                 'value' => trim((string) ($o['value'] ?? '')),

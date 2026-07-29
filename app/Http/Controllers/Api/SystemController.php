@@ -536,6 +536,13 @@ class SystemController extends Controller
      */
     private function sanitizeCustomListConfig(array $config): array
     {
+        // Origen "catálogo": el campo referencia un catálogo reutilizable → guarda
+        // solo la referencia; las opciones se resuelven al leer (CustomListResolver).
+        if (($config['source'] ?? 'inline') === 'catalog') {
+            abort_if(empty($config['custom_catalog_id']), 422, 'Elige un catálogo para la lista personalizada.');
+            return ['source' => 'catalog', 'custom_catalog_id' => (int) $config['custom_catalog_id']];
+        }
+
         $opts = collect($config['options'] ?? [])
             ->map(fn ($o) => [
                 'label' => trim((string) ($o['label'] ?? '')),

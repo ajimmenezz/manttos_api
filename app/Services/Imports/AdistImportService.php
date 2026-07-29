@@ -70,31 +70,54 @@ class AdistImportService
         $descKey = optional($fields->firstWhere('field_type', 'text'))->field_key;
         $imgKeys = $fields->where('field_type', 'image')->pluck('field_key')->values()->all();
 
-        ['devices' => $devices, 'byDid' => $byDid] = $this->deviceIndex($maintenance->site_id, $maintenance->catalog_id);
+        $maintenance->loadMissing('site');
+        ['devices' => $devices, 'byDid' => $byDid] = $this->deviceIndex(
+            $maintenance->site_id, $maintenance->catalog_id, optional($maintenance->site)->client_id
+        );
 
         return compact('activityType', 'descKey', 'imgKeys', 'byDid', 'devices');
     }
 
     /**
-     * Índice de dispositivos del directorio (sitio × sistema): la colección y el mapa
-     * DID normalizado → [device_id]. Reusado por la importación a actividades y a eventos.
+     * Índice de dispositivos del directorio (sitio × sistema): la colección (con etiqueta y
+     * texto buscable) y el mapa DID normalizado → [device_id]. Reusado por la importación a
+     * actividades y a eventos.
+     *
+     * GENÉRICO — no asume la plantilla de incendios: resuelve el campo DID por su
+     * `field_type='did'` (fallback 'did') y arma el texto de búsqueda con TODOS los valores
+     * del directorio (nombre, tipo, ubicación nativa y cualquier campo personalizado), de modo
+     * que se pueda buscar por DID, área, ubicación o lo que exista en el directorio.
      *
      * @return array{devices: \Illuminate\Support\Collection, byDid: array<string,array<int,int>>}
      */
-    private function deviceIndex(int $siteId, int $systemId): array
+    private function deviceIndex(int $siteId, int $systemId, ?int $clientId = null): array
     {
-        $devices = DB::table('devices as d')
+        $didKey = $this->didKeyFor($systemId, $clientId);
+
+        $rows = DB::table('devices as d')
             ->join('directories as dir', 'dir.id', '=', 'd.directory_id')
             ->where('dir.site_id', $siteId)
             ->where('dir.catalog_id', $systemId)
             ->whereNull('d.archived_at')
-            ->get([
-                'd.id',
-                DB::raw("d.custom_fields->>'did' as did"),
-                DB::raw("d.custom_fields->>'tipo_dispositivo' as tipo"),
-                DB::raw("d.custom_fields->>'dir_incendio_location' as loc"),
-                DB::raw("d.custom_fields->>'dir_incendio_area' as area"),
-            ]);
+            ->get(['d.id', 'd.name', 'd.device_type', 'd.location', 'd.custom_fields']);
+
+        $devices = $rows->map(function ($d) use ($didKey) {
+            $cf = $this->decodeCustom($d->custom_fields);
+            $did  = trim((string) ($cf[$didKey] ?? '')) ?: trim((string) $d->name);
+            $tipo = trim((string) $d->device_type);
+            // Todos los demás valores del directorio como texto (para buscar por ubicación/área/etc.).
+            $cfText = collect($cf)->forget($didKey)->flatMap(fn ($v) => $this->flatStrings($v))->filter()->values();
+            $loc = trim((string) $d->location) ?: $cfText->take(5)->implode(' · ');
+            $search = strtoupper(trim($did.' '.$tipo.' '.$d->location.' '.$cfText->implode(' ')));
+
+            return (object) [
+                'id'     => (int) $d->id,
+                'did'    => $did !== '' ? $did : null,
+                'tipo'   => $tipo !== '' ? $tipo : null,
+                'loc'    => $loc !== '' ? $loc : null,
+                'search' => $search,
+            ];
+        })->values();
 
         $byDid = [];
         foreach ($devices as $d) {
@@ -104,6 +127,70 @@ class AdistImportService
         }
 
         return compact('devices', 'byDid');
+    }
+
+    /** Clave real del campo DID del sistema (`field_type='did'`, override por cliente); fallback 'did'. */
+    private function didKeyFor(int $systemId, ?int $clientId): string
+    {
+        $did = \App\Models\SystemField::where('catalog_id', $systemId)
+            ->where('field_type', 'did')
+            ->where('is_active', true)
+            ->when($clientId !== null,
+                fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)))
+            ->orderByRaw('client_id is null')
+            ->value('field_key');
+
+        return $did ?: 'did';
+    }
+
+    /** Normaliza el `custom_fields` (jsonb string o array) a un arreglo asociativo. */
+    private function decodeCustom($raw): array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    /** Aplana un valor de campo (escalar o arreglo) a cadenas de texto, omitiendo URLs/imágenes. */
+    private function flatStrings($v): array
+    {
+        if (is_array($v)) {
+            $out = [];
+            foreach ($v as $x) {
+                $out = array_merge($out, $this->flatStrings($x));
+            }
+
+            return $out;
+        }
+        if ($v === null || is_bool($v)) {
+            return [];
+        }
+        $s = trim((string) $v);
+        if ($s === '' || Str::startsWith($s, ['http://', 'https://'])) {
+            return [];
+        }
+
+        return [$s];
+    }
+
+    /** Serializa la colección de dispositivos (del deviceIndex) al shape que consume la interfaz. */
+    private function devicePayload($devices): array
+    {
+        return collect($devices)->map(fn ($d) => [
+            'id'     => (int) $d->id,
+            'did'    => $d->did,
+            'tipo'   => $d->tipo,
+            'loc'    => $d->loc,
+            'label'  => trim(($d->did ?: '¿?').' · '.($d->tipo ?: '—').($d->loc ? ' · '.$d->loc : '')),
+            'search' => $d->search,
+        ])->values()->all();
     }
 
     /** Trae las tareas de un IdRequest + tipo desde ADIST3 (con su `device` y quién la ejecutó). */
@@ -316,13 +403,7 @@ class AdistImportService
                 'unmatched'  => $unmatched,
                 'imported'   => count($imported),
             ],
-            'devices' => $ctx['devices']->map(fn ($d) => [
-                'id'    => (int) $d->id,
-                'did'   => $d->did,
-                'tipo'  => $d->tipo,
-                'loc'   => $d->loc,
-                'label' => trim(($d->did ?: '¿?').' · '.($d->tipo ?: '—').($d->loc ? ' · '.$d->loc : '')),
-            ])->values()->all(),
+            'devices' => $this->devicePayload($ctx['devices']),
             'tasks' => $out,
         ];
     }
@@ -400,7 +481,7 @@ class AdistImportService
     {
         $site = Site::with('client')->findOrFail($siteId);
         $eventType = EventType::findOrFail($eventTypeId);
-        ['devices' => $devices, 'byDid' => $byDid] = $this->deviceIndex($siteId, $systemId);
+        ['devices' => $devices, 'byDid' => $byDid] = $this->deviceIndex($siteId, $systemId, $site->client_id);
         $tasks = $this->fetchTasks($requestId, $sourceType);
 
         $taskIds = array_map(fn ($t) => (int) $t->Id, $tasks);
@@ -451,13 +532,7 @@ class AdistImportService
                 'matched'  => $matched,
                 'imported' => count($imported),
             ],
-            'devices' => $devices->map(fn ($d) => [
-                'id'    => (int) $d->id,
-                'did'   => $d->did,
-                'tipo'  => $d->tipo,
-                'loc'   => $d->loc,
-                'label' => trim(($d->did ?: '¿?').' · '.($d->tipo ?: '—').($d->loc ? ' · '.$d->loc : '')),
-            ])->values()->all(),
+            'devices' => $this->devicePayload($devices),
             'tasks' => $out,
         ];
     }
@@ -474,7 +549,7 @@ class AdistImportService
     {
         $site = Site::with('client')->findOrFail($siteId);
         $eventType = EventType::findOrFail($eventTypeId);
-        ['byDid' => $byDid] = $this->deviceIndex($siteId, $systemId);
+        ['byDid' => $byDid] = $this->deviceIndex($siteId, $systemId, $site->client_id);
 
         $status = ($statusKey ? EventStatus::where('key', $statusKey)->first() : null)
             ?? EventStatus::where('is_initial', true)->orderBy('sort_order')->first();

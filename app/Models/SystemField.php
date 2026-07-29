@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ResolvesCustomListConfig;
 use Illuminate\Database\Eloquent\Model;
 
 class SystemField extends Model
 {
+    use ResolvesCustomListConfig;
+
     public const FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'list', 'custom_list', 'image', 'did'];
 
     protected $fillable = [
@@ -36,7 +39,6 @@ class SystemField extends Model
             'show_in_event_report' => 'boolean',
             'max_length'           => 'integer',
             'sort_order'        => 'integer',
-            'config'            => 'array',
         ];
     }
 

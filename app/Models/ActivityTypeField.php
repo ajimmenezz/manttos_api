@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ResolvesCustomListConfig;
 use Illuminate\Database\Eloquent\Model;
 
 class ActivityTypeField extends Model
 {
+    use ResolvesCustomListConfig;
+
     public const FIELD_TYPES = [
         'text', 'textarea', 'number', 'currency', 'scale',
         'date', 'time', 'datetime', 'boolean', 'list', 'multiselect',
@@ -41,7 +44,6 @@ class ActivityTypeField extends Model
             'sort_order'       => 'integer',
             'rules'            => 'array',
             'visibility'       => 'array',
-            'config'           => 'array',
         ];
     }
 

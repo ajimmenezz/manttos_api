@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\MaintenanceActivityController;
 use App\Http\Controllers\Api\MaintenanceDashboardController;
 use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\CatalogController;
+use App\Http\Controllers\Api\CustomCatalogController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\ClientEngineerController;
 use App\Http\Controllers\Api\ClientUserController;
@@ -37,6 +38,7 @@ use App\Http\Controllers\Api\DeviceController;
 use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\MaintenanceController;
 use App\Http\Controllers\Api\DeviceImportExportController;
+use App\Http\Controllers\Api\DirectoryAnalyzerController;
 use App\Http\Controllers\Api\DirectoryController;
 use App\Http\Controllers\Api\EventCommentController;
 use App\Http\Controllers\Api\EventController;
@@ -258,6 +260,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/sites', [SiteController::class, 'all']);
     // Directorios — lista plana scopeada por acceso del usuario (Operaciones → Directorios)
     Route::get('/directories', [DirectoryController::class, 'all']);
+
+    // Analista de Directorio (limpieza de valores del directorio con IA opcional + Excel)
+    Route::get( '/directories/{directory}/analyzer/fields',  [DirectoryAnalyzerController::class, 'fields']);
+    Route::post('/directories/{directory}/analyzer/analyze', [DirectoryAnalyzerController::class, 'analyze']);
+    Route::post('/directories/{directory}/analyzer/apply',   [DirectoryAnalyzerController::class, 'apply']);
+    Route::post('/directories/{directory}/analyzer/export',  [DirectoryAnalyzerController::class, 'exportExcel']);
+    Route::post('/directories/{directory}/analyzer/import',  [DirectoryAnalyzerController::class, 'importExcel']);
     // Compact antes del apiResource para evitar que {site} capture la literal "compact"
     Route::get('/clients/{client}/sites/compact', [SiteController::class, 'compact']);
     Route::apiResource('/clients/{client}/sites', SiteController::class);
@@ -299,6 +308,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/catalogs/{catalog}', [CatalogController::class, 'update']);
     Route::post('/catalogs/{catalog}/toggle-status', [CatalogController::class, 'toggleStatus']);
     Route::delete('/catalogs/{catalog}', [CatalogController::class, 'destroy']);
+
+    // Catálogos/listas REUTILIZABLES del usuario (campo "Lista personalizada").
+    Route::get('/custom-catalogs',          [CustomCatalogController::class, 'index']);
+    Route::get('/custom-catalogs/options',  [CustomCatalogController::class, 'forFields']); // antes del wildcard
+    Route::post('/custom-catalogs',         [CustomCatalogController::class, 'store']);
+    Route::put('/custom-catalogs/{customCatalog}',  [CustomCatalogController::class, 'update']);
+    Route::post('/custom-catalogs/{customCatalog}/toggle-status', [CustomCatalogController::class, 'toggleStatus']);
+    Route::delete('/custom-catalogs/{customCatalog}', [CustomCatalogController::class, 'destroy']);
 
     // Tipos de dispositivo → sistemas (API inversa)
     Route::get('/device-types/{catalog}/systems',       [SystemController::class, 'deviceTypeSystems']);

@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\ResolvesCustomListConfig;
 use Illuminate\Database\Eloquent\Model;
 
 class EventTypeField extends Model
 {
+    use ResolvesCustomListConfig;
+
     // Mismo conjunto de tipos que el formulario de actividades (motor compartido).
     public const FIELD_TYPES = [
         'text', 'textarea', 'number', 'currency', 'scale',
@@ -45,7 +48,6 @@ class EventTypeField extends Model
             'sort_order'  => 'integer',
             'rules'       => 'array',
             'visibility'  => 'array',
-            'config'      => 'array',
         ];
     }
 
