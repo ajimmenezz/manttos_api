@@ -44,12 +44,46 @@ class CustomCatalogController extends Controller
             'description' => $c->description,
             'client_id'   => $c->client_id,
             'client_name' => optional($c->client)->name,
-            'options'     => $c->normalizedOptions(),
-            'option_count' => count($c->normalizedOptions()),
+            'options'        => $c->activeOptions(),
+            'option_count'   => count($c->activeOptions()),
+            'archived_count' => count($c->normalizedOptions()) - count($c->activeOptions()),
             'is_active'   => $c->is_active,
         ]);
 
         return response()->json(['data' => $items]);
+    }
+
+    /** Catálogo individual con TODAS sus opciones (incluidas archivadas) para la página de gestión. */
+    public function show(Request $request, CustomCatalog $customCatalog): JsonResponse
+    {
+        abort_unless($request->user()->can('catalogs.view'), 403);
+
+        return response()->json(['data' => [
+            'id'          => $customCatalog->id,
+            'name'        => $customCatalog->name,
+            'description' => $customCatalog->description,
+            'client_id'   => $customCatalog->client_id,
+            'client_name' => optional($customCatalog->client)->name,
+            'options'     => $customCatalog->normalizedOptions(),
+            'is_active'   => $customCatalog->is_active,
+        ]]);
+    }
+
+    /** Reemplaza sólo las opciones (gestión desde la página propia; conserva archivadas). */
+    public function updateOptions(Request $request, CustomCatalog $customCatalog): JsonResponse
+    {
+        abort_unless($request->user()->can('catalogs.edit'), 403);
+
+        $data = $request->validate([
+            'options'            => 'present|array',
+            'options.*.label'    => 'nullable|string|max:200',
+            'options.*.value'    => 'nullable|string|max:200',
+            'options.*.archived' => 'nullable|boolean',
+        ]);
+
+        $customCatalog->update(['options' => $this->sanitizeOptions($data['options'])]);
+
+        return response()->json(['data' => $customCatalog->fresh()->normalizedOptions()]);
     }
 
     /**
@@ -69,7 +103,7 @@ class CustomCatalogController extends Controller
                 'id'        => $c->id,
                 'name'      => $c->name,
                 'client_id' => $c->client_id,
-                'options'   => $c->normalizedOptions(),
+                'options'   => $c->activeOptions(),
             ]);
 
         return response()->json(['data' => $items]);
@@ -97,13 +131,18 @@ class CustomCatalogController extends Controller
         abort_unless($request->user()->can('catalogs.edit'), 403);
         $data = $this->validateData($request);
 
-        $customCatalog->update([
+        $payload = [
             'client_id'   => $data['client_id'] ?? null,
             'name'        => $data['name'],
             'description' => $data['description'] ?? null,
-            'options'     => $this->sanitizeOptions($data['options'] ?? []),
             'is_active'   => $data['is_active'] ?? $customCatalog->is_active,
-        ]);
+        ];
+        // Sólo toca las opciones si vienen en la petición (el drawer de metadatos NO las envía;
+        // se gestionan en la página propia). Así editar el nombre no borra las opciones.
+        if ($request->has('options')) {
+            $payload['options'] = $this->sanitizeOptions($data['options']);
+        }
+        $customCatalog->update($payload);
 
         return response()->json(['data' => $customCatalog->fresh('client')]);
     }
@@ -186,14 +225,19 @@ class CustomCatalogController extends Controller
             'client_id'        => 'nullable|integer|exists:clients,id',
             'name'             => 'required|string|max:120',
             'description'      => 'nullable|string|max:255',
-            'options'          => 'required|array|min:1',
-            'options.*.label'  => 'nullable|string|max:200',
-            'options.*.value'  => 'nullable|string|max:200',
+            'options'            => 'nullable|array', // las opciones se gestionan en la página propia
+            'options.*.label'    => 'nullable|string|max:200',
+            'options.*.value'    => 'nullable|string|max:200',
+            'options.*.archived' => 'nullable|boolean',
             'is_active'        => 'nullable|boolean',
         ]);
     }
 
-    /** Normaliza a [{label,value}] con valores únicos y ≥1 opción no vacía. */
+    /**
+     * Normaliza a [{label,value,archived}] con valores únicos. Conserva el flag `archived`
+     * (las archivadas no se ofrecen al capturar, pero se guardan para no perder históricos).
+     * Permite lista vacía: las opciones se agregan en la página de gestión.
+     */
     private function sanitizeOptions(array $options): array
     {
         $out = [];
@@ -206,9 +250,8 @@ class CustomCatalogController extends Controller
             $label = $label ?: $value;
             if (isset($seen[$value])) continue;
             $seen[$value] = true;
-            $out[] = ['label' => $label, 'value' => $value];
+            $out[] = ['label' => $label, 'value' => $value, 'archived' => (bool) ($o['archived'] ?? false)];
         }
-        abort_if($out === [], 422, 'El catálogo necesita al menos una opción.');
 
         return $out;
     }

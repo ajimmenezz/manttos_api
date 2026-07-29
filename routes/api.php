@@ -322,6 +322,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/custom-catalogs/options',  [CustomCatalogController::class, 'forFields']); // antes del wildcard
     Route::get('/custom-catalogs/options-template', [CustomCatalogController::class, 'optionsTemplate']);
     Route::post('/custom-catalogs/parse-options',   [CustomCatalogController::class, 'parseOptions']);
+    Route::get('/custom-catalogs/{customCatalog}',         [CustomCatalogController::class, 'show']);
+    Route::put('/custom-catalogs/{customCatalog}/options', [CustomCatalogController::class, 'updateOptions']);
     Route::post('/custom-catalogs',         [CustomCatalogController::class, 'store']);
     Route::put('/custom-catalogs/{customCatalog}',  [CustomCatalogController::class, 'update']);
     Route::post('/custom-catalogs/{customCatalog}/toggle-status', [CustomCatalogController::class, 'toggleStatus']);

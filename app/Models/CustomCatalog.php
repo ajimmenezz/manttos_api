@@ -26,7 +26,11 @@ class CustomCatalog extends Model
         return $this->belongsTo(Client::class);
     }
 
-    /** Opciones normalizadas [{label, value}] (descarta filas vacías). */
+    /**
+     * Opciones normalizadas [{label, value, archived}] (descarta filas vacías).
+     * Conserva el flag `archived`: las archivadas NO se ofrecen al capturar (el front las filtra)
+     * pero SÍ se incluyen para resolver la etiqueta de valores históricos ya usados.
+     */
     public function normalizedOptions(): array
     {
         $out = [];
@@ -36,8 +40,18 @@ class CustomCatalog extends Model
             if ($label === '' && $value === '') {
                 continue;
             }
-            $out[] = ['label' => $label ?: $value, 'value' => $value ?: $label];
+            $out[] = [
+                'label'    => $label ?: $value,
+                'value'    => $value ?: $label,
+                'archived' => (bool) ($o['archived'] ?? false),
+            ];
         }
         return $out;
+    }
+
+    /** Solo las opciones activas (para conteos y selección). */
+    public function activeOptions(): array
+    {
+        return array_values(array_filter($this->normalizedOptions(), fn ($o) => ! $o['archived']));
     }
 }
