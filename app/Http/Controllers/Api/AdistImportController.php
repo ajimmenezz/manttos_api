@@ -108,6 +108,57 @@ class AdistImportController extends Controller
         ]);
     }
 
+    /**
+     * Campos disponibles para el mapeo origen→destino según el destino elegido:
+     * campos de ADIST + campos del formulario destino (con opciones) + mapa por defecto.
+     */
+    public function fields(Request $request): JsonResponse
+    {
+        $this->authorizeImport($request);
+
+        $data = $request->validate([
+            'target'                => ['nullable', 'in:activity,event'],
+            'type'                  => ['nullable', 'string', 'max:60'],
+            'maintenance_id'        => ['nullable', 'integer', 'exists:maintenances,id'],
+            'dest_activity_type_id' => ['nullable', 'integer', 'exists:catalogs,id'],
+            'event_type_id'         => ['nullable', 'integer', 'exists:event_types,id'],
+            'system_id'             => ['nullable', 'integer', 'exists:catalogs,id'],
+        ]);
+
+        $target = $data['target'] ?? 'activity';
+        $type = strtoupper($data['type'] ?? 'PREVENTIVO');
+
+        try {
+            if ($target === 'event') {
+                $request->validate([
+                    'event_type_id' => ['required', 'integer', 'exists:event_types,id'],
+                    'system_id'     => ['required', 'integer', 'exists:catalogs,id'],
+                ]);
+
+                return response()->json($this->service->fieldsPayload(
+                    'event', $type, null, null, (int) $data['event_type_id'], (int) $data['system_id'],
+                ));
+            }
+
+            $request->validate(['maintenance_id' => ['required', 'integer', 'exists:maintenances,id']]);
+            $maintenance = Maintenance::findOrFail($data['maintenance_id']);
+
+            return response()->json($this->service->fieldsPayload(
+                'activity', $type, $maintenance,
+                isset($data['dest_activity_type_id']) ? (int) $data['dest_activity_type_id'] : null,
+                null, null,
+            ));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json(['message' => 'No se pudieron cargar los campos del formulario destino.'], 502);
+        }
+    }
+
     /** Analiza un IdRequest de ADIST contra un mantenimiento destino (no escribe nada). */
     public function preview(Request $request): JsonResponse
     {
@@ -229,6 +280,8 @@ class AdistImportController extends Controller
             'statuses.*'     => ['nullable', 'string', 'max:60'],
             'task_ids'       => ['nullable', 'array'],
             'task_ids.*'     => ['integer'],
+            // Mapeo origen→destino {destFieldKey => sourceFieldKey}; se sanea en el servicio.
+            'field_map'      => ['nullable', 'array'],
         ]);
 
         $target = $data['target'] ?? 'activity';
@@ -251,6 +304,7 @@ class AdistImportController extends Controller
             }
         }
         $onlyTaskIds = isset($data['task_ids']) ? array_map('intval', $data['task_ids']) : null;
+        $fieldMap = is_array($data['field_map'] ?? null) ? $data['field_map'] : [];
 
         try {
             if ($target === 'event') {
@@ -263,12 +317,13 @@ class AdistImportController extends Controller
                 $result = $this->service->createEvents(
                     $data['request_id'], $type, $userId,
                     (int) $data['site_id'], (int) $data['system_id'], (int) $data['event_type_id'],
-                    $data['event_status_key'] ?? null, $map, $statusMap, $onlyTaskIds,
+                    $data['event_status_key'] ?? null, $map, $statusMap, $onlyTaskIds, $fieldMap,
                 );
 
+                // Solo se descargan imágenes de eventos recién creados (evita duplicar en backfill).
                 $queuedImages = false;
-                if ($result['pairs']) {
-                    ImportAdistImages::dispatch($result['pairs'], [], $userId, null, 'event');
+                if (! empty($result['new_pairs'])) {
+                    ImportAdistImages::dispatch($result['new_pairs'], [], $userId, null, 'event');
                     $queuedImages = true;
                 }
 
@@ -276,24 +331,24 @@ class AdistImportController extends Controller
                     'created'       => $result['created'],
                     'updated'       => $result['updated'],
                     'queued_images' => $queuedImages,
-                    'message'       => "Se importaron {$result['created']} eventos"
-                        .($result['updated'] ? " (y se actualizaron {$result['updated']})" : '')
+                    'message'       => ($result['created'] ? "Se importaron {$result['created']} eventos" : 'No se crearon eventos nuevos')
+                        .($result['updated'] ? " (y se rellenaron {$result['updated']} ya sincronizados)" : '')
                         .($queuedImages ? '. Las imágenes se están descargando en segundo plano; te avisaremos al terminar.' : '.'),
                 ]);
             }
 
-            // Destino ACTIVIDAD (comportamiento original + tipo destino explícito opcional).
+            // Destino ACTIVIDAD. El mapa de dispositivos es opcional (en backfill se conserva el existente).
             $request->validate([
                 'maintenance_id' => ['required', 'integer', 'exists:maintenances,id'],
-                'map'            => ['required', 'array', 'min:1'],
-                'map.*'          => ['required', 'integer', 'exists:devices,id'],
+                'map'            => ['nullable', 'array'],
+                'map.*'          => ['nullable', 'integer', 'exists:devices,id'],
             ]);
             $maintenance = Maintenance::findOrFail($data['maintenance_id']);
 
             $result = $this->service->createActivities(
                 $maintenance, $data['request_id'], $type, $userId, $map,
                 isset($data['dest_activity_type_id']) ? (int) $data['dest_activity_type_id'] : null,
-                $onlyTaskIds,
+                $onlyTaskIds, $fieldMap,
             );
         } catch (\Illuminate\Validation\ValidationException $e) {
             throw $e;
@@ -305,19 +360,23 @@ class AdistImportController extends Controller
             return response()->json(['message' => 'No se pudo importar desde el sistema externo (ADIST).'], 502);
         }
 
+        // Solo se descargan imágenes de actividades recién creadas (evita duplicar en backfill).
         $queuedImages = false;
-        if ($result['supports_images'] && $result['pairs']) {
-            ImportAdistImages::dispatch($result['pairs'], $result['imgKeys'], $userId, $maintenance->id);
+        if ($result['supports_images'] && ! empty($result['new_pairs'])) {
+            ImportAdistImages::dispatch($result['new_pairs'], $result['imgKeys'], $userId, $maintenance->id);
             $queuedImages = true;
         }
 
+        $backfilled = $result['backfilled'] ?? 0;
+
         return response()->json([
             'created'        => $result['created'],
+            'backfilled'     => $backfilled,
             'skipped'        => $result['skipped'],
             'queued_images'  => $queuedImages,
-            'message'        => $queuedImages
-                ? "Se importaron {$result['created']} actividades. Las imágenes se están descargando en segundo plano; te avisaremos al terminar."
-                : "Se importaron {$result['created']} actividades.",
+            'message'        => ($result['created'] ? "Se importaron {$result['created']} actividades" : 'No se crearon actividades nuevas')
+                .($backfilled ? " (y se rellenaron {$backfilled} ya sincronizadas)" : '')
+                .($queuedImages ? '. Las imágenes se están descargando en segundo plano; te avisaremos al terminar.' : '.'),
         ]);
     }
 }

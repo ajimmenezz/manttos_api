@@ -222,6 +222,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Importación desde ADIST3 (sistema anterior). Superadmin-only (integrations.import-external).
     Route::get('/developer/imports/adist/options',  [AdistImportController::class, 'options']);
     Route::post('/developer/imports/adist/task-types', [AdistImportController::class, 'taskTypes']);
+    Route::post('/developer/imports/adist/fields',  [AdistImportController::class, 'fields']);
     Route::post('/developer/imports/adist/preview', [AdistImportController::class, 'preview']);
     Route::post('/developer/imports/adist/task',    [AdistImportController::class, 'task']);
     Route::post('/developer/imports/adist/commit',  [AdistImportController::class, 'commit']);

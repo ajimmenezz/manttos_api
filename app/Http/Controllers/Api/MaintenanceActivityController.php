@@ -29,7 +29,10 @@ class MaintenanceActivityController extends Controller
      */
     private function resolveExecutionDate(?string $provided, $fallback)
     {
-        if (! AppSetting::executionDateAllowed() || empty($provided)) {
+        // El flag global habilita la fecha para todos; un superadmin siempre puede corregirla
+        // (aunque el flag esté apagado). En ambos casos, el tope sigue siendo hoy (sin futuro).
+        $allowed = AppSetting::executionDateAllowed() || (bool) optional(request()->user())->hasRole('superadmin');
+        if (! $allowed || empty($provided)) {
             return $fallback;
         }
         $d = Carbon::parse($provided);
