@@ -282,6 +282,9 @@ class AdistImportController extends Controller
             'task_ids.*'     => ['integer'],
             // Mapeo origen→destino {destFieldKey => sourceFieldKey}; se sanea en el servicio.
             'field_map'      => ['nullable', 'array'],
+            // Mapeo de estados {nombreEstadoADIST => statusKey}; solo eventos, se aplica al crear.
+            'status_name_map' => ['nullable', 'array'],
+            'status_name_map.*' => ['nullable', 'string', 'max:60'],
         ]);
 
         $target = $data['target'] ?? 'activity';
@@ -306,6 +309,14 @@ class AdistImportController extends Controller
         $onlyTaskIds = isset($data['task_ids']) ? array_map('intval', $data['task_ids']) : null;
         $fieldMap = is_array($data['field_map'] ?? null) ? $data['field_map'] : [];
 
+        // Mapeo de estados { nombreEstadoADIST => statusKey }.
+        $statusNameMap = [];
+        foreach (($data['status_name_map'] ?? []) as $name => $key) {
+            if ($key) {
+                $statusNameMap[(string) $name] = (string) $key;
+            }
+        }
+
         try {
             if ($target === 'event') {
                 $request->validate([
@@ -317,7 +328,7 @@ class AdistImportController extends Controller
                 $result = $this->service->createEvents(
                     $data['request_id'], $type, $userId,
                     (int) $data['site_id'], (int) $data['system_id'], (int) $data['event_type_id'],
-                    $data['event_status_key'] ?? null, $map, $statusMap, $onlyTaskIds, $fieldMap,
+                    $data['event_status_key'] ?? null, $map, $statusMap, $onlyTaskIds, $fieldMap, $statusNameMap,
                 );
 
                 // Solo se descargan imágenes de eventos recién creados (evita duplicar en backfill).

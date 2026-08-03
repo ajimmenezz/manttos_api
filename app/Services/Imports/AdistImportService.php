@@ -867,9 +867,14 @@ class AdistImportService
                 'description'  => trim(strip_tags((string) $t->Description)),
                 'has_images'   => isset($withImages[$id]),
                 'status'       => $status,
+                'source_status' => $t->status_name,
                 'device_id'    => $deviceId,
             ];
         }
+
+        // Estados distintos de ADIST presentes en esta corrida (para el mapeo de estados).
+        $sourceStatuses = collect($tasks)->pluck('status_name')
+            ->map(fn ($s) => trim((string) $s))->filter()->unique()->values()->all();
 
         return [
             'target' => 'event',
@@ -883,6 +888,7 @@ class AdistImportService
                 'matched'  => $matched,
                 'imported' => count($imported),
             ],
+            'source_statuses' => $sourceStatuses,
             'devices' => $this->devicePayload($devices),
             'tasks' => $out,
         ];
@@ -896,7 +902,7 @@ class AdistImportService
      * @param  array<int,int>  $map  overrides {task_id => device_id}
      * @return array{created:int, updated:int, pairs:array<int,array{task_id:int, event_id:int}>, supports_images:bool}
      */
-    public function createEvents(string|int $requestId, string $sourceType, int $userId, int $siteId, int $systemId, int $eventTypeId, ?string $statusKey, array $map = [], array $statusMap = [], ?array $onlyTaskIds = null, array $fieldMap = []): array
+    public function createEvents(string|int $requestId, string $sourceType, int $userId, int $siteId, int $systemId, int $eventTypeId, ?string $statusKey, array $map = [], array $statusMap = [], ?array $onlyTaskIds = null, array $fieldMap = [], array $statusNameMap = []): array
     {
         $site = Site::with('client')->findOrFail($siteId);
         $eventType = EventType::findOrFail($eventTypeId);
@@ -945,8 +951,13 @@ class AdistImportService
             $isNew = ! $event->exists;
 
             if ($isNew) {
-                // Estado elegido para ESTE evento (override por fila); si no, el de la corrida.
+                // Estado de ESTE evento por precedencia: override por fila > mapa por estado
+                // de ADIST > estado de la corrida.
                 $statusId = $defaultStatusId;
+                $sName = trim((string) ($t->status_name ?? ''));
+                if ($sName !== '' && isset($statusNameMap[$sName]) && isset($statusIdByKey[$statusNameMap[$sName]])) {
+                    $statusId = (int) $statusIdByKey[$statusNameMap[$sName]];
+                }
                 $rowKey = $statusMap[$id] ?? null;
                 if ($rowKey && isset($statusIdByKey[$rowKey])) {
                     $statusId = (int) $statusIdByKey[$rowKey];
