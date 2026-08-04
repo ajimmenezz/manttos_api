@@ -94,7 +94,23 @@ class EventController extends Controller
 
         $this->scopeEvents($request, $query, $showArchived);
 
-        return response()->json($query->paginate($request->per_page ?? 100));
+        $paginated = $query->paginate($request->per_page ?? 100);
+
+        // Resuelve el DID de cada dispositivo según la llave del campo DID de su sistema
+        // (varía por sistema/cliente) y lo adjunta para mostrarlo en el listado.
+        $didKeyCache = [];
+        foreach ($paginated->getCollection() as $ev) {
+            if (! $ev->device) {
+                continue;
+            }
+            $cacheKey = $ev->system_id.':'.$ev->client_id;
+            $didKey = $didKeyCache[$cacheKey] ??= $this->didKeyFor((int) $ev->system_id, $ev->client_id ? (int) $ev->client_id : null);
+            $cf = $ev->device->custom_fields;
+            $cf = is_array($cf) ? $cf : (is_string($cf) ? (json_decode($cf, true) ?: []) : []);
+            $ev->device->setAttribute('did', $cf[$didKey] ?? null);
+        }
+
+        return response()->json($paginated);
     }
 
     // ─── Archivar / restaurar (fuera de interfaz y reportería) ────
