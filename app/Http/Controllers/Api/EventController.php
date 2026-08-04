@@ -68,7 +68,8 @@ class EventController extends Controller
 
         $query = Event::query()
             ->with(['eventType:id,label,nature,color', 'system:id,label', 'status:id,key,label,color,is_terminal',
-                    'site:id,name,client_id', 'client:id,name,short_name', 'creator:id,name', 'assignee:id,name'])
+                    'site:id,name,client_id', 'client:id,name,short_name', 'creator:id,name', 'assignee:id,name',
+                    'device:id,name,device_type,custom_fields'])
             ->when($request->filled('client_id'),     fn ($q) => $q->where('events.client_id', $request->client_id))
             ->when($request->filled('site_id'),       fn ($q) => $q->where('events.site_id', $request->site_id))
             ->when($request->filled('system_id'),     fn ($q) => $q->where('events.system_id', $request->system_id))
