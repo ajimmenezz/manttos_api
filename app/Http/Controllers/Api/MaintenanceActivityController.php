@@ -339,6 +339,113 @@ class MaintenanceActivityController extends Controller
     }
 
     /**
+     * GET /maintenances/{maintenance}/activities/{activity}
+     * Detalle de UNA actividad (para su pantalla propia): dispositivo + directorio, tipo,
+     * usuario, fecha, valores capturados y origen (ADIST). Los campos del formulario los
+     * resuelve el front con /activity-types/{type}/systems/{system}/fields.
+     */
+    public function show(Maintenance $maintenance, MaintenanceActivity $activity): JsonResponse
+    {
+        $this->authorizeAccess($maintenance);
+        abort_unless((int) $activity->maintenance_id === (int) $maintenance->id, 404, 'La actividad no pertenece a este mantenimiento.');
+
+        $activity->load([
+            'activityType:id,label',
+            'user:id,name',
+            'device:id,name,device_type,custom_fields,directory_id',
+            'device.directory:id,name',
+        ]);
+
+        $systemId = (int) $maintenance->catalog_id;
+        $maintenance->loadMissing('site');
+        $didKey = $this->didKeyForSystem($systemId, $maintenance->site?->client_id);
+        $cf = is_array($activity->device?->custom_fields) ? $activity->device->custom_fields : [];
+        $fv = is_array($activity->field_values) ? $activity->field_values : [];
+
+        return response()->json([
+            'id'            => $activity->id,
+            'maintenance_id' => (int) $maintenance->id,
+            'system_id'     => $systemId,
+            'performed_at'  => $activity->performed_at,
+            'created_at'    => $activity->created_at,
+            'field_values'  => $fv,
+            'source'        => $fv['_origen'] ?? null,
+            'activity_type' => $activity->activityType,
+            'user'          => $activity->user,
+            'device'        => $activity->device ? [
+                'id'             => $activity->device->id,
+                'name'           => $activity->device->name,
+                'device_type'    => $activity->device->device_type,
+                'did'            => $cf[$didKey] ?? null,
+                'custom_fields'  => $cf,
+                'directory_name' => $activity->device->directory?->name,
+            ] : null,
+        ]);
+    }
+
+    /**
+     * POST /maintenances/{maintenance}/activities/{activity}/retype
+     * Cambia el tipo de UNA actividad. `field_map` = { nuevaLlave: viejaLlave }: cada campo
+     * del nuevo tipo toma el valor del campo viejo elegido. Los valores no mapeados se
+     * CONSERVAN OCULTOS (quedan en el registro; los que chocan con una llave del nuevo tipo
+     * se mueven a `_orphans` para no filtrarse como valor del nuevo campo).
+     */
+    public function retype(Request $request, Maintenance $maintenance, MaintenanceActivity $activity): JsonResponse
+    {
+        $this->authorizeAccess($maintenance);
+        abort_unless((int) $activity->maintenance_id === (int) $maintenance->id, 404, 'La actividad no pertenece a este mantenimiento.');
+
+        $data = $request->validate([
+            'activity_type_id' => 'required|integer|exists:catalogs,id',
+            'field_map'        => 'nullable|array',   // { nuevaLlave: viejaLlave }
+            'field_map.*'      => 'nullable|string',
+        ]);
+
+        $systemId = (int) $maintenance->catalog_id;
+        $newTypeId = (int) $data['activity_type_id'];
+
+        // El tipo destino debe estar vinculado a este sistema.
+        $linked = DB::table('activity_type_systems')
+            ->where('system_id', $systemId)->where('activity_type_id', $newTypeId)->exists();
+        abort_unless($linked, 422, 'El tipo de actividad destino no aplica a este sistema.');
+
+        $newKeys = \App\Models\ActivityTypeField::where('activity_type_id', $newTypeId)
+            ->where('system_id', $systemId)->where('is_active', true)
+            ->pluck('field_key')->all();
+
+        $old = is_array($activity->field_values) ? $activity->field_values : [];
+        $map = is_array($data['field_map'] ?? null) ? $data['field_map'] : [];
+
+        // Parte del viejo (conserva todo lo capturado como oculto).
+        $fv = $old;
+        $orphans = is_array($old['_orphans'] ?? null) ? $old['_orphans'] : [];
+
+        foreach ($newKeys as $nk) {
+            $srcKey = $map[$nk] ?? null;
+            if ($srcKey && array_key_exists($srcKey, $old)) {
+                $fv[$nk] = $old[$srcKey];
+            } else {
+                // Sin mapeo: limpia la llave del nuevo tipo para no filtrar un valor viejo
+                // homónimo; si tenía algo, se guarda como huérfano recuperable.
+                if (array_key_exists($nk, $old) && ($old[$nk] ?? null) !== null && $old[$nk] !== '') {
+                    $orphans[$nk] = $old[$nk];
+                }
+                unset($fv[$nk]);
+            }
+        }
+        if ($orphans) {
+            $fv['_orphans'] = $orphans;
+        }
+
+        $activity->update(['activity_type_id' => $newTypeId, 'field_values' => $fv]);
+
+        return response()->json([
+            'message'  => 'Actividad retipificada.',
+            'activity' => $activity->fresh(['activityType:id,label']),
+        ]);
+    }
+
+    /**
      * GET /maintenances/{maintenance}/activities/export
      * Descarga en Excel el detalle de las capturas del mantenimiento (una hoja por tipo de
      * actividad; columnas = dispositivo/DID/directorio/fecha/usuario + cada campo del formulario).
