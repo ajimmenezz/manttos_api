@@ -17,7 +17,7 @@ class ServiceSheetExport extends Model
 
     protected $fillable = [
         'client_id', 'from_date', 'to_date', 'status',
-        'requested_by', 'event_count', 'file_path', 'error',
+        'requested_by', 'event_count', 'file_path', 'error', 'tenant',
     ];
 
     protected function casts(): array

@@ -39,7 +39,9 @@ class GenerateServiceSheetsZip implements ShouldQueue
         $export->update(['status' => ServiceSheetExport::STATUS_PROCESSING]);
 
         try {
-            $branding = AppSetting::allAsMap();
+            // Branding del tenant que solicitó el export (white-label por dominio); si no
+            // se guardó tenant (exports viejos), cae al 'default'.
+            $branding = AppSetting::allAsMap($export->tenant ?: AppSetting::DEFAULT_TENANT);
             $from = $export->from_date->copy()->startOfDay();
             $to   = $export->to_date->copy()->endOfDay();
 

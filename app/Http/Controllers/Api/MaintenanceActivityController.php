@@ -250,6 +250,39 @@ class MaintenanceActivityController extends Controller
     {
         $this->authorizeAccess($maintenance);
 
+        ['activities' => $activities, 'available' => $available] = $this->gatherActivities($request, $maintenance);
+
+        $result = $activities->map(fn ($act) => [
+            'id'            => $act->id,
+            'performed_at'  => $act->performed_at,
+            'created_at'    => $act->created_at,
+            'field_values'  => $act->field_values ?? [],
+            'activity_type' => $act->activityType,
+            'user'          => $act->user,
+            'device'        => $act->device ? [
+                'id'             => $act->device->id,
+                'name'           => $act->device->name,
+                'device_type'    => $act->device->device_type,
+                'custom_fields'  => $act->device->custom_fields ?? [],
+                'directory_name' => $act->device->directory?->name,
+            ] : null,
+        ]);
+
+        return response()->json([
+            'entries'           => $result,
+            'available_filters' => $available,
+        ]);
+    }
+
+    /**
+     * Reúne las actividades del mantenimiento aplicando el mismo criterio que el dashboard:
+     * fecha (performed_at) + filtros de directorio y de formulario. Reutilizado por el log
+     * (JSON) y por la exportación a Excel.
+     *
+     * @return array{activities: \Illuminate\Support\Collection, available: array, systemId: int}
+     */
+    private function gatherActivities(Request $request, Maintenance $maintenance): array
+    {
         $validated = $request->validate([
             'date_from'    => 'nullable|date',
             'date_to'      => 'nullable|date|after_or_equal:date_from',
@@ -302,26 +335,156 @@ class MaintenanceActivityController extends Controller
             ->filter(fn ($a) => $this->activityPassesFormFilters($a, $filters['form'], $filterMeta['form_modes']))
             ->values();
 
-        $result = $activities->map(fn ($act) => [
-            'id'            => $act->id,
-            'performed_at'  => $act->performed_at,
-            'created_at'    => $act->created_at,
-            'field_values'  => $act->field_values ?? [],
-            'activity_type' => $act->activityType,
-            'user'          => $act->user,
-            'device'        => $act->device ? [
-                'id'             => $act->device->id,
-                'name'           => $act->device->name,
-                'device_type'    => $act->device->device_type,
-                'custom_fields'  => $act->device->custom_fields ?? [],
-                'directory_name' => $act->device->directory?->name,
-            ] : null,
-        ]);
+        return ['activities' => $activities, 'available' => $filterMeta['available'], 'systemId' => $systemId];
+    }
 
-        return response()->json([
-            'entries'           => $result,
-            'available_filters' => $filterMeta['available'],
+    /**
+     * GET /maintenances/{maintenance}/activities/export
+     * Descarga en Excel el detalle de las capturas del mantenimiento (una hoja por tipo de
+     * actividad; columnas = dispositivo/DID/directorio/fecha/usuario + cada campo del formulario).
+     * Respeta el mismo rango de fechas y filtros que el dashboard.
+     */
+    public function export(Request $request, Maintenance $maintenance): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $this->authorizeAccess($maintenance);
+
+        ['activities' => $activities, 'systemId' => $systemId] = $this->gatherActivities($request, $maintenance);
+
+        $maintenance->loadMissing('site');
+        $didKey = $this->didKeyForSystem($systemId, $maintenance->site?->client_id);
+
+        // Definiciones de campos por tipo de actividad (activos, en orden; sin leyendas).
+        $fieldsByType = [];
+        foreach ($activities->pluck('activity_type_id')->unique()->filter() as $tid) {
+            $fieldsByType[$tid] = \App\Models\ActivityTypeField::where('activity_type_id', $tid)
+                ->where('system_id', $systemId)->where('is_active', true)
+                ->where('field_type', '!=', 'leyenda')
+                ->orderBy('sort_order')->orderBy('id')->get();
+        }
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $spreadsheet->removeSheetByIndex(0);
+        $usedTitles = [];
+
+        $grouped = $activities->groupBy('activity_type_id');
+        if ($grouped->isEmpty()) {
+            $sheet = $spreadsheet->createSheet();
+            $sheet->setTitle('Sin capturas');
+            $sheet->setCellValue('A1', 'No hay capturas para el rango o filtros seleccionados.');
+        }
+
+        foreach ($grouped as $tid => $acts) {
+            $typeLabel = optional($acts->first()->activityType)->label ?? ('Tipo '.$tid);
+            $fields = $fieldsByType[$tid] ?? collect();
+
+            $sheet = $spreadsheet->createSheet();
+            $sheet->setTitle($this->uniqueSheetTitle($typeLabel, $usedTitles));
+
+            $headers = ['DID', 'Dispositivo', 'Tipo de dispositivo', 'Directorio', 'Fecha', 'Capturado por'];
+            foreach ($fields as $f) {
+                $headers[] = $f->label;
+            }
+            $sheet->fromArray($headers, null, 'A1');
+            $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+            $sheet->getStyle("A1:{$lastCol}1")->getFont()->setBold(true);
+            $sheet->freezePane('A2');
+
+            $row = 2;
+            foreach ($acts as $act) {
+                $cf = is_array($act->device?->custom_fields) ? $act->device->custom_fields : [];
+                $fv = is_array($act->field_values) ? $act->field_values : [];
+                $line = [
+                    (string) ($cf[$didKey] ?? ''),
+                    $act->device?->name ?? '',
+                    $act->device?->device_type ?? '',
+                    $act->device?->directory?->name ?? '',
+                    optional($act->performed_at)->format('d/m/Y'),
+                    $act->user?->name ?? '',
+                ];
+                foreach ($fields as $f) {
+                    $line[] = $this->formatCellValue($fv[$f->field_key] ?? null, $f);
+                }
+                $sheet->fromArray($line, null, 'A'.$row);
+                $row++;
+            }
+
+            for ($ci = 1; $ci <= count($headers); $ci++) {
+                $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($ci);
+                $sheet->getColumnDimension($col)->setAutoSize(true);
+            }
+        }
+
+        $filename = 'capturas-mantenimiento-'.$maintenance->id.'.xlsx';
+
+        return response()->streamDownload(function () use ($spreadsheet) {
+            (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
+    }
+
+    /** Valor legible de un campo del formulario para una celda de Excel. */
+    private function formatCellValue($v, \App\Models\ActivityTypeField $field): string
+    {
+        $type = $field->field_type;
+        if ($v === null || $v === '' || $v === []) {
+            return '';
+        }
+        if (in_array($type, ['custom_list', 'custom_multiselect'], true)) {
+            $opts = is_array($field->config) ? ($field->config['options'] ?? []) : [];
+            $map = [];
+            foreach ($opts as $o) {
+                if (isset($o['value'])) {
+                    $map[(string) $o['value']] = $o['label'] ?? $o['value'];
+                }
+            }
+            $vals = is_array($v) ? $v : [$v];
+
+            return implode(', ', array_map(fn ($x) => $map[(string) $x] ?? (string) $x, $vals));
+        }
+        if (is_bool($v)) {
+            return $v ? 'Sí' : 'No';
+        }
+        if (in_array($type, ['image', 'signature'], true)) {
+            $imgs = array_filter(is_array($v) ? $v : [$v], fn ($x) => is_string($x) && $x !== '');
+
+            return implode(' | ', $imgs);
+        }
+        if (is_array($v)) {
+            return implode(', ', array_map('strval', $v));
+        }
+
+        return (string) $v;
+    }
+
+    /** Clave del campo DID del sistema (field_type='did', override por cliente); fallback 'did'. */
+    private function didKeyForSystem(int $systemId, ?int $clientId): string
+    {
+        $did = \App\Models\SystemField::where('catalog_id', $systemId)
+            ->where('field_type', 'did')
+            ->where('is_active', true)
+            ->when($clientId !== null,
+                fn ($q) => $q->where(fn ($w) => $w->whereNull('client_id')->orWhere('client_id', $clientId)))
+            ->orderByRaw('client_id is null')
+            ->value('field_key');
+
+        return $did ?: 'did';
+    }
+
+    /** Título de hoja válido (≤31, sin caracteres prohibidos) y único dentro del libro. */
+    private function uniqueSheetTitle(string $title, array &$used): string
+    {
+        $t = trim(preg_replace('/[\\\\\/\?\*\[\]:]/', ' ', $title));
+        $t = mb_substr($t, 0, 28) ?: 'Hoja';
+        $base = $t;
+        $i = 2;
+        while (isset($used[mb_strtolower($t)])) {
+            $t = mb_substr($base, 0, 25).' '.$i;
+            $i++;
+        }
+        $used[mb_strtolower($t)] = true;
+
+        return $t;
     }
 
     /** PUT /maintenances/{maintenance}/activities/{activity} */

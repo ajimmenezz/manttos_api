@@ -43,6 +43,9 @@ class ServiceSheetExportController extends Controller
             'to_date'      => $to->toDateString(),
             'status'       => ServiceSheetExport::STATUS_PENDING,
             'requested_by' => $user->id,
+            // Branding por dominio (white-label): se resuelve aquí porque el Job corre en
+            // la cola sin request, y allAsMap() sin tenant tomaría el 'default'.
+            'tenant'       => \App\Support\Tenant::fromRequest($request),
         ]);
 
         GenerateServiceSheetsZip::dispatch($export->id);

@@ -209,16 +209,34 @@ class ServiceSheetRenderer
             && preg_match('/\.(png|jpe?g|gif|webp|svg)$/i', explode('?', $v)[0]);
     }
 
-    /** Convierte una URL pública (maintenance-media/...) a data-URI leyendo el archivo local. */
+    /**
+     * Convierte una URL pública (del disco `public`) a data-URI leyendo el archivo local,
+     * para que dompdf la incruste sin red. Resuelve la ruta relativa real después de
+     * `/storage/` (logo/branding, imágenes de campos, etc.) y cae a maintenance-media/
+     * o al nombre base como respaldo. Acepta también data-URIs ya formados.
+     */
     private function dataUri(string $url): ?string
     {
+        if (str_starts_with($url, 'data:')) {
+            return $url;
+        }
         try {
-            $base = basename((string) parse_url($url, PHP_URL_PATH));
             $disk = Storage::disk('public');
-            foreach (["maintenance-media/{$base}", $base] as $path) {
-                if ($disk->exists($path)) {
-                    $bytes = $disk->get($path);
-                    $mime  = $disk->mimeType($path) ?: 'image/jpeg';
+            $path = (string) parse_url($url, PHP_URL_PATH);
+            $base = basename($path);
+
+            // Ruta relativa al disco público: lo que sigue a "/storage/".
+            $candidates = [];
+            if (($pos = strpos($path, '/storage/')) !== false) {
+                $candidates[] = ltrim(substr($path, $pos + strlen('/storage/')), '/');
+            }
+            $candidates[] = "maintenance-media/{$base}";
+            $candidates[] = $base;
+
+            foreach (array_unique(array_filter($candidates)) as $rel) {
+                if ($disk->exists($rel)) {
+                    $bytes = $disk->get($rel);
+                    $mime  = $disk->mimeType($rel) ?: 'image/jpeg';
                     return 'data:' . $mime . ';base64,' . base64_encode($bytes);
                 }
             }

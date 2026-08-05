@@ -591,6 +591,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/activity-counts',  [MaintenanceActivityController::class, 'activityCounts']);
     Route::get('/maintenances/{maintenance}/floor-plans',      [MaintenanceActivityController::class, 'floorPlans']);
     Route::get('/maintenances/{maintenance}/log',              [MaintenanceActivityController::class, 'log']);
+    Route::get('/maintenances/{maintenance}/activities/export', [MaintenanceActivityController::class, 'export']);
     Route::post('/maintenances/{maintenance}/activities',                [MaintenanceActivityController::class, 'store']);
     Route::put('/maintenances/{maintenance}/activities/{activity}',     [MaintenanceActivityController::class, 'update']);
     Route::delete('/maintenances/{maintenance}/activities/{activity}',  [MaintenanceActivityController::class, 'destroy']);
@@ -653,6 +654,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/activity-types',     [MaintenanceActivityController::class, 'activityTypes']);
     Route::get('/maintenances/{maintenance}/activity-counts',    [MaintenanceActivityController::class, 'activityCounts']);
     Route::get('/maintenances/{maintenance}/log',                [MaintenanceActivityController::class, 'log']);
+    Route::get('/maintenances/{maintenance}/activities/export',  [MaintenanceActivityController::class, 'export']);
     Route::get('/maintenances/{maintenance}/dashboard',          [MaintenanceDashboardController::class, 'show']);
     Route::get('/maintenances/{maintenance}/contract-dashboard', [MaintenanceDashboardController::class, 'contractDashboard']);
     Route::get('/maintenances/{maintenance}/devices/{device}/activities', [MaintenanceActivityController::class, 'deviceActivities']);
