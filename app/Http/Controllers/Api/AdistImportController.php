@@ -379,14 +379,24 @@ class AdistImportController extends Controller
         }
 
         $backfilled = $result['backfilled'] ?? 0;
+        $retyped    = $result['retyped'] ?? 0;
+
+        $extra = [];
+        if ($backfilled) {
+            $extra[] = "se rellenaron {$backfilled} ya sincronizadas";
+        }
+        if ($retyped) {
+            $extra[] = "se retipificaron {$retyped} (cambió su tipo de actividad)";
+        }
 
         return response()->json([
             'created'        => $result['created'],
             'backfilled'     => $backfilled,
+            'retyped'        => $retyped,
             'skipped'        => $result['skipped'],
             'queued_images'  => $queuedImages,
             'message'        => ($result['created'] ? "Se importaron {$result['created']} actividades" : 'No se crearon actividades nuevas')
-                .($backfilled ? " (y se rellenaron {$backfilled} ya sincronizadas)" : '')
+                .($extra ? ' ('.implode(' y ', $extra).')' : '')
                 .($queuedImages ? '. Las imágenes se están descargando en segundo plano; te avisaremos al terminar.' : '.'),
         ]);
     }

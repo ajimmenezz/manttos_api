@@ -744,9 +744,12 @@ class AdistImportService
 
         $created = 0;
         $backfilled = 0;
+        $retyped = 0;
         $skipped = 0;
         $pairs = [];      // todos (para imágenes de nuevos)
         $newPairs = [];   // solo creados
+
+        $destTypeId = (int) $ctx['activityType']->id;
 
         foreach ($tasks as $t) {
             $id = (int) $t->Id;
@@ -763,10 +766,17 @@ class AdistImportService
                 continue;
             }
 
+            // RETIPIFICACIÓN: la actividad ya existe pero bajo OTRO tipo → se corrige al tipo
+            // destino elegido y se RECONSTRUYE field_values desde cero (limpia lo del tipo
+            // anterior; se rellena solo con lo mapeado + descripción por defecto).
+            $isRetype = ! $isNew && (int) $existing->activity_type_id !== $destTypeId;
+            $rebuild  = $isNew || $isRetype;
+
             $mapped = $fieldMap ? $this->buildMappedValues($fieldMap, $destByKey, $t) : [];
 
-            // field_values: parte del existente (backfill preserva lo capturado), o vacío al crear.
-            $fv = $isNew ? [] : (is_array($existing->field_values) ? $existing->field_values : []);
+            // field_values: desde cero al crear o retipificar; en backfill del mismo tipo,
+            // parte del existente para preservar lo capturado.
+            $fv = $rebuild ? [] : (is_array($existing->field_values) ? $existing->field_values : []);
             $fv['_origen'] = [
                 'sistema'     => 'adist3',
                 'task_id'     => $id,
@@ -774,8 +784,8 @@ class AdistImportService
                 'asignado'    => $t->assigned,
                 'date_create' => $t->DateCreate,
             ];
-            // Descripción por defecto solo al crear y si el mapa no la redefine (compat histórica).
-            if ($isNew && $ctx['descKey'] && ! isset($mapped[$ctx['descKey']])) {
+            // Descripción por defecto al crear/retipificar si el mapa no la redefine.
+            if ($rebuild && $ctx['descKey'] && ! isset($mapped[$ctx['descKey']])) {
                 $fv[$ctx['descKey']] = trim(strip_tags((string) $t->Description));
             }
             foreach ($mapped as $k => $v) {
@@ -787,7 +797,7 @@ class AdistImportService
                     'source_ref'       => 'adist3:'.$id,
                     'maintenance_id'   => $maintenance->id,
                     'device_id'        => (int) $deviceId,
-                    'activity_type_id' => $ctx['activityType']->id,
+                    'activity_type_id' => $destTypeId,
                     'user_id'          => $userId,
                     'performed_at'     => $t->ExecutionDate,
                     'field_values'     => $fv,
@@ -795,14 +805,17 @@ class AdistImportService
                 $created++;
                 $newPairs[] = ['task_id' => $id, 'activity_id' => $activity->id];
             } else {
-                // Backfill: solo campos + dispositivo si hay override; conserva fecha/tipo/usuario.
+                // Backfill/retipificación: conserva fecha/usuario; ajusta tipo solo al retipificar.
                 $update = ['field_values' => $fv];
+                if ($isRetype) {
+                    $update['activity_type_id'] = $destTypeId;
+                }
                 if (isset($map[$id])) {
                     $update['device_id'] = (int) $map[$id];
                 }
                 $existing->update($update);
                 $activity = $existing;
-                $backfilled++;
+                $isRetype ? $retyped++ : $backfilled++;
             }
 
             $pairs[] = ['task_id' => $id, 'activity_id' => $activity->id];
@@ -811,6 +824,7 @@ class AdistImportService
         return [
             'created'         => $created,
             'backfilled'      => $backfilled,
+            'retyped'         => $retyped,
             'pairs'           => $pairs,
             'new_pairs'       => $newPairs,
             'skipped'         => $skipped,
