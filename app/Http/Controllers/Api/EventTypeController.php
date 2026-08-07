@@ -28,7 +28,13 @@ class EventTypeController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        // Lectura del catálogo de tipos: la necesitan tanto quien CONFIGURA eventos
+        // (event-config.manage) como quien los CREA (events.create) para el selector de
+        // alta. Las mutaciones (store/update/…) siguen protegidas por event-config.manage.
+        abort_unless(
+            $request->user()->canAny(['event-config.manage', 'events.create']),
+            403, 'No autorizado para esta acción.'
+        );
         $query = EventType::query()->withCount('linkedSystems as systems_count');
         if ($request->boolean('only_active')) {
             $query->where('is_active', true);
