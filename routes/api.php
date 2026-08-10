@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\McpController;
 use App\Http\Controllers\Api\MaintenanceActionPlanController;
 use App\Http\Controllers\Api\MaintenanceActivityController;
 use App\Http\Controllers\Api\MaintenanceDashboardController;
+use App\Http\Controllers\Api\MaintenanceReportController;
 use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\CustomCatalogController;
@@ -562,6 +563,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vista consolidada de mantenimientos (scope por rol)
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);
     Route::post('/my-maintenances',         [MaintenanceController::class, 'quickCreate']);
+
+    // Reporte GLOBAL de mantenimientos (uso interno) — rutas estáticas ANTES del wildcard {maintenance}
+    Route::get('/maintenances/report',        [MaintenanceReportController::class, 'show']);
+    Route::get('/maintenances/report/list',   [MaintenanceReportController::class, 'reportList']);
+    Route::get('/maintenances/report/export', [MaintenanceReportController::class, 'export']);
+
     Route::get('/maintenances/{maintenance}', [MaintenanceController::class, 'show']);
     Route::post('/maintenances/{maintenance}/archive', [MaintenanceController::class, 'archive']); // archivar (fuera de listas)
     Route::post('/maintenances/{maintenance}/restore', [MaintenanceController::class, 'restore']);
