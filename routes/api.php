@@ -488,6 +488,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/export',          [EventDashboardController::class, 'export']); // antes del wildcard {event}
     Route::get('/events/report-list',     [EventDashboardController::class, 'reportList']); // antes del wildcard {event}
     Route::get('/events/plan-devices',    [EventDashboardController::class, 'planDevices']); // antes del wildcard {event}
+    // Sitios accesibles (selectores de hojas de servicio / bitácora) + Bitácora de eventos
+    Route::get('/events/sites',    [EventController::class, 'sites']);    // antes del wildcard {event}
+    Route::get('/events/bitacora', [EventController::class, 'bitacora']); // antes del wildcard {event}
     // Exportación en ZIP de hojas de servicio (segundo plano) — antes del wildcard {event}
     Route::post('/events/service-sheets',                 [ServiceSheetExportController::class, 'store']);
     Route::get('/events/service-sheets/{serviceSheetExport}',          [ServiceSheetExportController::class, 'show']);

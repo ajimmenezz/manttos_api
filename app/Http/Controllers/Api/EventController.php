@@ -115,6 +115,115 @@ class EventController extends Controller
         return response()->json($paginated);
     }
 
+    /** Sitios accesibles para el usuario (para selectores de hojas de servicio / bitácora). */
+    public function sites(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('events.view'), 403);
+        $user = $request->user();
+
+        $q = Site::query()->with('client:id,name,short_name')->whereHas('client')->orderBy('sites.name');
+
+        if ($user->hasAnyRole(['superadmin', 'admin'])) {
+            // todos
+        } elseif ($user->hasRole('admin-cliente')) {
+            $q->whereIn('client_id', $user->clientsAsAdmin()->pluck('clients.id'));
+        } elseif ($user->hasRole('admin-sitio')) {
+            $q->whereIn('id', $user->sitesAsAdmin()->pluck('sites.id'));
+        } elseif ($user->hasRole('ingeniero')) {
+            $q->whereIn('id', $this->engineerSiteIds($user));
+        } else {
+            $q->whereRaw('1 = 0');
+        }
+
+        return response()->json(
+            $q->get(['id', 'name', 'client_id'])->map(fn (Site $s) => [
+                'id'          => $s->id,
+                'name'        => $s->name,
+                'client_id'   => $s->client_id,
+                'client_name' => optional($s->client)->short_name ?: optional($s->client)->name,
+            ])
+        );
+    }
+
+    /**
+     * Bitácora de eventos de un SITIO en un rango de fechas (formato imprimible). Devuelve
+     * los eventos cuyo momento efectivo (ocurrencia o creación) cae en el rango, ordenados
+     * cronológicamente, con los datos para el listado y el encabezado (sitio/cliente).
+     */
+    public function bitacora(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('events.view'), 403);
+
+        $data = $request->validate([
+            'site_id' => 'required|exists:sites,id',
+            'from'    => 'required|date',
+            'to'      => 'required|date|after_or_equal:from',
+        ]);
+
+        $from = Carbon::parse($data['from'])->startOfDay();
+        $to   = Carbon::parse($data['to'])->endOfDay();
+        abort_if($from->diffInDays($to) > 366, 422, 'El rango no puede ser mayor a un año.');
+
+        $site = Site::with('client:id,name,short_name')->findOrFail($data['site_id']);
+
+        $query = Event::query()
+            ->where('events.site_id', $site->id)
+            ->whereRaw('COALESCE(events.occurred_at, events.created_at) >= ?', [$from])
+            ->whereRaw('COALESCE(events.occurred_at, events.created_at) <= ?', [$to]);
+        // Alcance por rol (excluye archivados y clientes/sitios archivados). Si el sitio
+        // no está en el alcance del usuario, simplemente no habrá resultados.
+        $this->scopeEvents($request, $query);
+
+        $events = $query
+            ->with(['eventType:id,label,nature,color', 'status:id,label,color', 'system:id,label',
+                    'device:id,name,device_type,custom_fields', 'creator:id,name', 'assignee:id,name'])
+            ->orderByRaw('COALESCE(events.occurred_at, events.created_at)')
+            ->limit(2000)
+            ->get(['id', 'folio', 'description', 'system_id', 'client_id', 'event_type_id', 'device_id',
+                   'status_id', 'priority', 'occurred_at', 'created_at']);
+
+        // DID por dispositivo (según el campo DID del sistema).
+        $didKeyCache = [];
+        $rows = $events->map(function (Event $e) use (&$didKeyCache) {
+            $did = null;
+            if ($e->device) {
+                $ck = $e->system_id . ':' . $e->client_id;
+                $key = $didKeyCache[$ck] ??= $this->didKeyFor((int) $e->system_id, $e->client_id ? (int) $e->client_id : null);
+                $cf = is_array($e->device->custom_fields) ? $e->device->custom_fields : [];
+                $did = $cf[$key] ?? null;
+            }
+            return [
+                'id'          => $e->id,
+                'folio'       => $e->folio,
+                'occurred_at' => $e->occurred_at ?? $e->created_at,
+                'type'        => optional($e->eventType)->label,
+                'nature'      => optional($e->eventType)->nature,
+                'system'      => optional($e->system)->label,
+                'status'      => optional($e->status)->label,
+                'status_color'=> optional($e->status)->color,
+                'priority'    => $e->priority,
+                'device'      => optional($e->device)->name,
+                'device_type' => optional($e->device)->device_type,
+                'did'         => $did,
+                'creator'     => optional($e->creator)->name,
+                'assignee'    => optional($e->assignee)->name,
+                'description' => $e->description,
+            ];
+        });
+
+        return response()->json([
+            'site' => [
+                'id'     => $site->id,
+                'name'   => $site->name,
+                'client' => optional($site->client)->short_name ?: optional($site->client)->name,
+            ],
+            'from'   => $from->toDateString(),
+            'to'     => $to->toDateString(),
+            'count'  => $rows->count(),
+            'events' => $rows,
+        ]);
+    }
+
     // ─── Archivar / restaurar (fuera de interfaz y reportería) ────
     /**
      * Archiva un evento: deja de aparecer en el listado y en los reportes, pero se conserva

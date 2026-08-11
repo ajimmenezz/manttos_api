@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateServiceSheetsZip;
 use App\Models\ServiceSheetExport;
+use App\Models\Site;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -26,19 +27,21 @@ class ServiceSheetExportController extends Controller
         abort_unless($user->can('events.view'), 403, 'No autorizado para esta acción.');
 
         $data = $request->validate([
-            'client_id' => 'required|exists:clients,id',
-            'from'      => 'required|date',
-            'to'        => 'required|date|after_or_equal:from',
+            'site_id' => 'required|exists:sites,id',
+            'from'    => 'required|date',
+            'to'      => 'required|date|after_or_equal:from',
         ]);
 
         $from = Carbon::parse($data['from'])->startOfDay();
         $to   = Carbon::parse($data['to'])->startOfDay();
         abort_if($from->diffInDays($to) > 31, 422, 'El rango de fechas no puede ser mayor a 31 días.');
 
-        $this->assertClientAccess($user, (int) $data['client_id']);
+        $site = Site::findOrFail($data['site_id']);
+        $this->assertSiteAccess($user, $site);
 
         $export = ServiceSheetExport::create([
-            'client_id'    => $data['client_id'],
+            'client_id'    => $site->client_id,
+            'site_id'      => $site->id,
             'from_date'    => $from->toDateString(),
             'to_date'      => $to->toDateString(),
             'status'       => ServiceSheetExport::STATUS_PENDING,
@@ -61,7 +64,7 @@ class ServiceSheetExportController extends Controller
     {
         abort_unless($this->canAccess($request->user(), $serviceSheetExport), 403);
 
-        return response()->json($serviceSheetExport->load('client:id,name'));
+        return response()->json($serviceSheetExport->load('client:id,name', 'site:id,name'));
     }
 
     /** Descarga el ZIP generado (autenticado). */
@@ -75,19 +78,35 @@ class ServiceSheetExportController extends Controller
             404, 'El archivo aún no está disponible.'
         );
 
-        $client = optional($serviceSheetExport->client)->name ?? 'cliente';
-        $name = 'hojas-servicio-' . \Illuminate\Support\Str::slug($client) . '-'
+        $label = optional($serviceSheetExport->site)->name
+            ?? optional($serviceSheetExport->client)->name ?? 'sitio';
+        $name = 'hojas-servicio-' . \Illuminate\Support\Str::slug($label) . '-'
             . $serviceSheetExport->from_date->format('Ymd') . '-' . $serviceSheetExport->to_date->format('Ymd') . '.zip';
 
         return Storage::disk('local')->download($serviceSheetExport->file_path, $name);
     }
 
-    private function assertClientAccess(User $user, int $clientId): void
+    private function assertSiteAccess(User $user, Site $site): void
     {
-        if ($user->hasRole('admin-cliente')
-            && ! $user->clientsAsAdmin()->where('clients.id', $clientId)->exists()) {
-            abort(403, 'No tienes acceso a este cliente.');
+        if ($user->hasAnyRole(['superadmin', 'admin'])) return;
+
+        if ($user->hasRole('admin-cliente')) {
+            abort_unless($user->clientsAsAdmin()->where('clients.id', $site->client_id)->exists(),
+                403, 'No tienes acceso a este sitio.');
+            return;
         }
+        if ($user->hasRole('admin-sitio')) {
+            abort_unless($user->sitesAsAdmin()->where('sites.id', $site->id)->exists(),
+                403, 'No tienes acceso a este sitio.');
+            return;
+        }
+        if ($user->hasRole('ingeniero')) {
+            $viaClient = Site::whereIn('client_id', $user->clientsAsEngineer()->pluck('clients.id'))
+                ->where('id', $site->id)->exists();
+            $direct = $user->sitesAsEngineer()->where('sites.id', $site->id)->exists();
+            abort_unless($viaClient || $direct, 403, 'No tienes acceso a este sitio.');
+        }
+        // Otros roles con events.view: el selector /events/sites ya acota lo que pueden elegir.
     }
 
     private function canAccess(User $user, ServiceSheetExport $export): bool

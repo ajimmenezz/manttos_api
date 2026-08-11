@@ -16,7 +16,7 @@ class ServiceSheetExport extends Model
     public const STATUS_FAILED     = 'failed';
 
     protected $fillable = [
-        'client_id', 'from_date', 'to_date', 'status',
+        'client_id', 'site_id', 'from_date', 'to_date', 'status',
         'requested_by', 'event_count', 'file_path', 'error', 'tenant',
     ];
 
@@ -31,6 +31,11 @@ class ServiceSheetExport extends Model
     public function client()
     {
         return $this->belongsTo(\App\Models\Client::class);
+    }
+
+    public function site()
+    {
+        return $this->belongsTo(\App\Models\Site::class);
     }
 
     public function requester()

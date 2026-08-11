@@ -45,8 +45,11 @@ class GenerateServiceSheetsZip implements ShouldQueue
             $from = $export->from_date->copy()->startOfDay();
             $to   = $export->to_date->copy()->endOfDay();
 
-            // Eventos del cliente cuyo momento efectivo (ocurrencia o creación) cae en el rango.
-            $events = Event::where('client_id', $export->client_id)
+            // Eventos del SITIO (si está definido) o del cliente (exports viejos) cuyo
+            // momento efectivo (ocurrencia o creación) cae en el rango.
+            $events = Event::query()
+                ->when($export->site_id, fn ($q) => $q->where('site_id', $export->site_id),
+                                         fn ($q) => $q->where('client_id', $export->client_id))
                 ->whereRaw('COALESCE(occurred_at, created_at) >= ?', [$from])
                 ->whereRaw('COALESCE(occurred_at, created_at) <= ?', [$to])
                 ->orderByRaw('COALESCE(occurred_at, created_at)')
@@ -71,7 +74,7 @@ class GenerateServiceSheetsZip implements ShouldQueue
 
             // Si no hubo eventos, incluye una nota para que el ZIP no quede vacío.
             if ($events->isEmpty()) {
-                $zip->addFromString('SIN-EVENTOS.txt', 'No se encontraron eventos para este cliente en el rango seleccionado.');
+                $zip->addFromString('SIN-EVENTOS.txt', 'No se encontraron eventos para este sitio en el rango seleccionado.');
             }
 
             $zip->close();
@@ -87,6 +90,7 @@ class GenerateServiceSheetsZip implements ShouldQueue
                 'export_id' => $export->id,
                 'count'     => $events->count(),
                 'client'    => optional($export->client)->name,
+                'site'      => optional($export->site)->name,
                 'from'      => $export->from_date->format('Y-m-d'),
                 'to'        => $export->to_date->format('Y-m-d'),
             ]);
