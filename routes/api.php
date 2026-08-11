@@ -26,6 +26,7 @@ use App\Http\Middleware\RequireWriteScope;
 use App\Http\Controllers\Api\McpController;
 use App\Http\Controllers\Api\MaintenanceActionPlanController;
 use App\Http\Controllers\Api\MaintenanceActivityController;
+use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\ImpersonationController;
 use App\Http\Controllers\Api\MaintenanceDashboardController;
 use App\Http\Controllers\Api\MaintenanceReportController;
@@ -191,6 +192,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/change-password', [AuthController::class, 'changePassword']);
+
+    // Auditoría del sistema (sensible; gateada por audit.view / superadmin).
+    Route::get('/audit',         [AuditController::class, 'index']);
+    Route::get('/audit/filters', [AuditController::class, 'filters']);
 
     // Suplantación de usuario (solo superadmin, web). Estáticas antes del wildcard {user}.
     Route::get('/impersonate/users', [ImpersonationController::class, 'users']);

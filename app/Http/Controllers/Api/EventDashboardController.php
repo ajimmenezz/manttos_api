@@ -822,6 +822,7 @@ class EventDashboardController extends Controller
     public function export(Request $request): StreamedResponse
     {
         abort_unless($request->user()->can('events.view'), 403);
+        app(\App\Support\ActivityLogger::class)->log('events', 'exported', 'Exportó el reporte de eventos (Excel)', ['source' => 'request']);
         $events   = $this->filteredEventsForList($request);
         $defs     = $this->reportColumnDefs($events);
         $resolved = $this->resolvedMap($events);

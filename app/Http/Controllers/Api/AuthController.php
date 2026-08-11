@@ -35,6 +35,10 @@ class AuthController extends Controller
 
         $user->update(['last_login_at' => now()]);
 
+        app(\App\Support\ActivityLogger::class)->log('auth', 'login', 'Inició sesión', [
+            'source' => 'auth', 'user_id' => $user->id,
+        ]);
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -46,6 +50,8 @@ class AuthController extends Controller
 
     public function logout(Request $request): JsonResponse
     {
+        app(\App\Support\ActivityLogger::class)->log('auth', 'logout', 'Cerró sesión', ['source' => 'auth']);
+
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Sesión cerrada correctamente.']);

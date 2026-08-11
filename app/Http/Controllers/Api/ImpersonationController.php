@@ -66,6 +66,11 @@ class ImpersonationController extends Controller
             'started_at'      => now(),
         ]);
 
+        app(\App\Support\ActivityLogger::class)->log('auth', 'impersonate_start', "Suplantó a {$user->name}", [
+            'source' => 'auth', 'user_id' => $me->id,
+            'subject_type' => 'User', 'subject_id' => $user->id, 'subject_label' => $user->name,
+        ]);
+
         return response()->json([
             'token'        => $token->plainTextToken,
             'user'         => UserPayload::for($user),
@@ -94,6 +99,11 @@ class ImpersonationController extends Controller
         abort_if(! $log, 422, 'No hay una suplantación activa para esta sesión.');
 
         $log->update(['ended_at' => now()]);
+
+        app(\App\Support\ActivityLogger::class)->log('auth', 'impersonate_stop', 'Terminó la suplantación', [
+            'source' => 'auth',
+            'subject_type' => 'User', 'subject_id' => $log->impersonated_id,
+        ]);
 
         // Revocar el token suplantado para que no quede vivo tras volver.
         if ($token && method_exists($token, 'delete')) {

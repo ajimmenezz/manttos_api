@@ -100,6 +100,7 @@ class RoleSeeder extends Seeder
             Permission::where('guard_name', 'web')
                 ->where('name', '!=', 'config.manage')
                 ->where('name', '!=', 'devices.apply-change')
+                ->where('name', '!=', 'audit.view') // auditoría: superadmin-only por defecto (grantable por UI)
                 ->where('name', 'not like', '%.archive')
                 ->where('name', 'not like', 'integrations.%')
                 ->get()

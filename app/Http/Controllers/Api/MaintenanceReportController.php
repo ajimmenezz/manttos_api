@@ -178,6 +178,7 @@ class MaintenanceReportController extends Controller
     public function export(Request $request): StreamedResponse
     {
         abort_unless($request->user()->can('maintenances.report'), 403);
+        app(\App\Support\ActivityLogger::class)->log('maintenances', 'exported', 'Exportó el reporte de mantenimientos (Excel)', ['source' => 'request']);
 
         [$activities, $formDefs, $dirDefs] = $this->collect($request);
         $cols = $this->columnDefs($activities, $formDefs, $dirDefs);

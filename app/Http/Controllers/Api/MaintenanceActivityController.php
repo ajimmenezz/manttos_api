@@ -653,6 +653,7 @@ class MaintenanceActivityController extends Controller
     public function export(Request $request, Maintenance $maintenance): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         $this->authorizeAccess($maintenance);
+        app(\App\Support\ActivityLogger::class)->log('activities', 'exported', "Exportó las capturas del mantenimiento #{$maintenance->id} (Excel)", ['source' => 'request', 'subject_type' => 'Maintenance', 'subject_id' => $maintenance->id]);
 
         ['activities' => $activities, 'systemId' => $systemId] = $this->gatherActivities($request, $maintenance);
 
