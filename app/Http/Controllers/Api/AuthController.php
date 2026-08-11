@@ -152,24 +152,6 @@ class AuthController extends Controller
 
     private function userPayload(User $user): array
     {
-        $user->load('roles');
-
-        // Superadmin gets all permissions so the frontend can render everything
-        if ($user->hasRole('superadmin')) {
-            $permissions = \Spatie\Permission\Models\Permission::pluck('name');
-        } else {
-            $permissions = $user->getAllPermissions()->pluck('name')->unique()->values();
-        }
-
-        return [
-            'id'                   => $user->id,
-            'name'                 => $user->name,
-            'email'                => $user->email,
-            'must_change_password' => $user->must_change_password,
-            'is_active'            => $user->is_active,
-            'roles'                => $user->roles->pluck('name'),
-            'permissions'          => $permissions,
-            'last_login_at'        => $user->last_login_at,
-        ];
+        return \App\Support\UserPayload::for($user);
     }
 }
