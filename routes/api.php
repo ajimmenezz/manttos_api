@@ -601,6 +601,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/activities/export', [MaintenanceActivityController::class, 'export']);
     Route::get('/maintenances/{maintenance}/activities/{activity}',       [MaintenanceActivityController::class, 'show']);
     Route::post('/maintenances/{maintenance}/activities/{activity}/retype', [MaintenanceActivityController::class, 'retype']);
+    Route::get('/maintenances/{maintenance}/activities/{activity}/transfer-options', [MaintenanceActivityController::class, 'transferOptions']);
+    Route::post('/maintenances/{maintenance}/activities/{activity}/transfer-to-event', [MaintenanceActivityController::class, 'transferToEvent']);
     Route::post('/maintenances/{maintenance}/activities',                [MaintenanceActivityController::class, 'store']);
     Route::put('/maintenances/{maintenance}/activities/{activity}',     [MaintenanceActivityController::class, 'update']);
     Route::delete('/maintenances/{maintenance}/activities/{activity}',  [MaintenanceActivityController::class, 'destroy']);

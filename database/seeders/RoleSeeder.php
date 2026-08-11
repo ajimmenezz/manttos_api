@@ -79,6 +79,7 @@ class RoleSeeder extends Seeder
             'floor-plans.view',
             'maintenances.view', 'maintenances.record-activity', 'maintenances.schedule-devices',
             'events.view', 'events.create', 'events.fill-form', 'events.change-status', 'events.comment',
+            'activities.set-execution-date',
             'devices.request-change',
             'chat.use', 'chat.group-manage',
         ]);

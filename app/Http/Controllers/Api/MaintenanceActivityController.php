@@ -4,14 +4,22 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\MaintenanceActivityFilters;
+use App\Models\ActivityTypeField;
 use App\Models\AppSetting;
 use App\Models\Catalog;
 use App\Models\Device;
 use App\Models\Directory;
+use App\Models\Event;
+use App\Models\EventStatus;
+use App\Models\EventStatusHistory;
+use App\Models\EventType;
+use App\Models\EventTypeField;
 use App\Models\FloorPlan;
 use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
+use App\Services\Imports\AdistImportService;
 use App\Services\Webhooks\WebhookDispatcher;
+use App\Support\EventFolio;
 use App\Support\WebhookEvent;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -29,9 +37,11 @@ class MaintenanceActivityController extends Controller
      */
     private function resolveExecutionDate(?string $provided, $fallback)
     {
-        // El flag global habilita la fecha para todos; un superadmin siempre puede corregirla
-        // (aunque el flag esté apagado). En ambos casos, el tope sigue siendo hoy (sin futuro).
-        $allowed = AppSetting::executionDateAllowed() || (bool) optional(request()->user())->hasRole('superadmin');
+        // El flag global habilita la fecha para todos; además, quien tenga el permiso
+        // `activities.set-execution-date` (ingenieros por defecto; superadmin por bypass)
+        // puede fijarla/corregirla aunque el flag esté apagado. Tope = hoy (sin futuro).
+        $allowed = AppSetting::executionDateAllowed()
+            || (bool) optional(request()->user())->can('activities.set-execution-date');
         if (! $allowed || empty($provided)) {
             return $fallback;
         }
@@ -443,6 +453,195 @@ class MaintenanceActivityController extends Controller
             'message'  => 'Actividad retipificada.',
             'activity' => $activity->fresh(['activityType:id,label']),
         ]);
+    }
+
+    // ─── Transferir una actividad a un EVENTO (superadmin) ────────────────────
+    // Se documentó como actividad algo que era un evento: el superadmin crea un evento
+    // nuevo del tipo elegido, mapea los campos capturados y elimina la actividad.
+
+    /**
+     * GET /maintenances/{maintenance}/activities/{activity}/transfer-options
+     * Insumos del asistente: tipos de evento del sistema del mantenimiento + los campos
+     * de la actividad (con vista previa de su valor) como origen del mapeo.
+     */
+    public function transferOptions(Request $request, Maintenance $maintenance, MaintenanceActivity $activity): JsonResponse
+    {
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo un superadministrador puede transferir a evento.');
+        abort_unless($activity->maintenance_id === $maintenance->id, 404);
+
+        $systemId = (int) $maintenance->catalog_id;
+
+        $eventTypes = EventType::where('is_active', true)
+            ->whereHas('linkedSystems', fn ($q) => $q->where('catalogs.id', $systemId))
+            ->orderBy('label')->get(['id', 'label', 'nature']);
+
+        $fields = ActivityTypeField::where('activity_type_id', $activity->activity_type_id)
+            ->where('system_id', $systemId)->where('is_active', true)
+            ->where('field_type', '!=', 'leyenda')
+            ->orderBy('sort_order')->orderBy('id')->get();
+
+        $fv = is_array($activity->field_values) ? $activity->field_values : [];
+        $sourceFields = $fields->map(fn ($f) => [
+            'field_key'  => $f->field_key,
+            'label'      => $f->label,
+            'field_type' => $f->field_type,
+            'preview'    => $this->formatCellValue($fv[$f->field_key] ?? null, $f),
+        ])->values();
+
+        // Con `event_type_id` devuelve además los campos DESTINO (activos) del evento.
+        $destFields = [];
+        if ($request->filled('event_type_id')) {
+            $destModels = EventTypeField::where('event_type_id', (int) $request->event_type_id)
+                ->where('system_id', $systemId)->where('is_active', true)
+                ->where('field_type', '!=', 'leyenda')
+                ->orderBy('sort_order')->orderBy('id')->get();
+            $destFields = collect($destModels)->map(fn ($f) => [
+                'field_key'  => $f->field_key,
+                'label'      => $f->label,
+                'field_type' => $f->field_type,
+            ])->values();
+        }
+
+        return response()->json([
+            'system_id'     => $systemId,
+            'event_types'   => $eventTypes,
+            'source_fields' => $sourceFields,
+            'dest_fields'   => $destFields,
+        ]);
+    }
+
+    /**
+     * POST /maintenances/{maintenance}/activities/{activity}/transfer-to-event
+     * Crea un evento del tipo elegido con los campos mapeados (arrastra sitio/sistema/
+     * dispositivo/fecha de la actividad) y ELIMINA la actividad. Superadmin.
+     */
+    public function transferToEvent(Request $request, Maintenance $maintenance, MaintenanceActivity $activity): JsonResponse
+    {
+        abort_unless($request->user()->hasRole('superadmin'), 403, 'Solo un superadministrador puede transferir a evento.');
+        abort_unless($activity->maintenance_id === $maintenance->id, 404);
+
+        $data = $request->validate([
+            'event_type_id' => 'required|integer|exists:event_types,id',
+            'field_map'     => 'array',           // { destKey: sourceKey }
+            'field_map.*'   => 'nullable|string',
+            'description'   => 'nullable|string',
+        ]);
+
+        $maintenance->loadMissing('site');
+        $site = $maintenance->site;
+        abort_if(! $site, 422, 'El mantenimiento no tiene sitio.');
+        $systemId = (int) $maintenance->catalog_id;
+
+        // El tipo de evento debe estar ligado al sistema del mantenimiento.
+        $type = EventType::where('id', $data['event_type_id'])
+            ->whereHas('linkedSystems', fn ($q) => $q->where('catalogs.id', $systemId))
+            ->first();
+        abort_if(! $type, 422, 'El tipo de evento no pertenece al sistema del mantenimiento.');
+
+        // Campos destino (evento) + su descripción para coerción.
+        $destFieldModels = EventTypeField::where('event_type_id', $type->id)
+            ->where('system_id', $systemId)->where('is_active', true)
+            ->orderBy('sort_order')->orderBy('id')->get();
+        $svc       = app(AdistImportService::class);
+        $destMetas = $svc->describeDestFields($destFieldModels);
+
+        // Tipo de cada campo ORIGEN (actividad) para copiar directo cuando coincide.
+        $srcTypeByKey = ActivityTypeField::where('activity_type_id', $activity->activity_type_id)
+            ->where('system_id', $systemId)
+            ->pluck('field_type', 'field_key')->all();
+
+        $fieldValues = $this->mapActivityValuesToEvent(
+            $data['field_map'] ?? [],
+            $destMetas,
+            is_array($activity->field_values) ? $activity->field_values : [],
+            $srcTypeByKey,
+            $svc,
+        );
+
+        $status = EventStatus::where('is_initial', true)->orderBy('sort_order')->first()
+            ?? EventStatus::orderBy('sort_order')->first();
+        abort_if(! $status, 422, 'No hay estados de evento configurados.');
+
+        $description = trim((string) ($data['description'] ?? ''))
+            ?: ('Transferido desde actividad de mantenimiento #' . $maintenance->id
+                . ' (' . (optional($activity->activityType)->label ?? 'actividad') . ').');
+
+        $user = $request->user();
+
+        $event = DB::transaction(function () use ($site, $systemId, $type, $activity, $status, $fieldValues, $description, $user) {
+            $event = Event::create([
+                'folio'         => EventFolio::next($site->client),
+                'client_id'     => $site->client_id,
+                'site_id'       => $site->id,
+                'system_id'     => $systemId,
+                'event_type_id' => $type->id,
+                'device_id'     => $activity->device_id,
+                'status_id'     => $status->id,
+                'priority'      => $type->default_priority ?: 'media',
+                'priority_auto' => false,
+                'description'   => $description,
+                'field_values'  => ! empty($fieldValues) ? $fieldValues : null,
+                'created_by'    => $user->id,
+                'occurred_at'   => $activity->performed_at,
+            ]);
+
+            EventStatusHistory::create([
+                'event_id'       => $event->id,
+                'from_status_id' => null,
+                'to_status_id'   => $status->id,
+                'user_id'        => $user->id,
+                'note'           => 'Evento creado por transferencia desde una actividad',
+                'created_at'     => now(),
+            ]);
+
+            // La actividad fue un error de documentación: se elimina tras crear el evento.
+            $activity->delete();
+
+            return $event;
+        });
+
+        return response()->json([
+            'message'  => "Actividad transferida al evento {$event->folio}.",
+            'event_id' => $event->id,
+            'folio'    => $event->folio,
+        ], 201);
+    }
+
+    /**
+     * Construye los `field_values` del evento a partir del mapa {destKey: sourceKey}.
+     * Si el tipo de origen y destino coinciden, copia el valor tal cual (mismo formato
+     * canónico, sin pérdida); si difieren, coerciona best-effort con el servicio ADIST.
+     */
+    private function mapActivityValuesToEvent(array $fieldMap, array $destMetas, array $sourceValues, array $srcTypeByKey, AdistImportService $svc): array
+    {
+        $destByKey = collect($destMetas)->keyBy('field_key');
+        $out = [];
+        foreach ($fieldMap as $destKey => $srcKey) {
+            if ($srcKey === null || $srcKey === '') continue;
+            $meta = $destByKey->get($destKey);
+            if (! $meta) continue;
+            if (! array_key_exists($srcKey, $sourceValues)) continue;
+
+            $raw = $sourceValues[$srcKey];
+            if ($raw === null || $raw === '' || $raw === []) continue;
+
+            $destType = $meta['field_type'];
+            $srcType  = $srcTypeByKey[$srcKey] ?? null;
+
+            if ($srcType === $destType) {
+                $out[$destKey] = $raw;                       // mismo tipo → copia directa
+                continue;
+            }
+            // Tipos distintos → string best-effort + coerción al tipo destino.
+            $asString = is_array($raw)
+                ? implode(', ', array_map('strval', $raw))
+                : (is_bool($raw) ? ($raw ? 'Sí' : 'No') : (string) $raw);
+            $coerced = $svc->coerceValue($meta, $asString);
+            if ($coerced !== null && $coerced !== '' && $coerced !== []) {
+                $out[$destKey] = $coerced;
+            }
+        }
+        return $out;
     }
 
     /**

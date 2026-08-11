@@ -35,6 +35,7 @@ class Event extends Model
         'ai_summary_stale',
         'created_by',
         'assigned_to',
+        'assigned_at',
         'occurred_at',
         'archived_at',
     ];
@@ -49,6 +50,7 @@ class Event extends Model
             'ai_summary_at'          => 'datetime',
             'ai_summary_stale'       => 'boolean',
             'occurred_at'            => 'datetime',
+            'assigned_at'            => 'datetime',
             'scheduled_attention_at' => 'datetime',
             'priority_auto'          => 'boolean',
             'archived_at'            => 'datetime',

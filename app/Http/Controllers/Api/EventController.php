@@ -42,9 +42,11 @@ class EventController extends Controller
      */
     private function resolveOccurredAt(?string $provided, $fallback)
     {
-        // El flag global habilita la fecha para todos; un superadmin siempre puede corregirla
-        // (aunque el flag esté apagado). En ambos casos, el tope sigue siendo hoy (sin futuro).
-        $allowed = AppSetting::executionDateAllowed() || (bool) optional(request()->user())->hasRole('superadmin');
+        // El flag global habilita la fecha para todos; además, quien tenga el permiso
+        // `activities.set-execution-date` (ingenieros por defecto; superadmin por bypass)
+        // puede fijarla/corregirla aunque el flag esté apagado. Tope = hoy (sin futuro).
+        $allowed = AppSetting::executionDateAllowed()
+            || (bool) optional(request()->user())->can('activities.set-execution-date');
         if (! $allowed || empty($provided)) {
             return $fallback;
         }
@@ -215,6 +217,9 @@ class EventController extends Controller
                 'field_values'  => $hasForm ? $data['field_values'] : null,
                 'images'        => ! empty($data['images']) ? array_values($data['images']) : null,
                 'created_by'    => $user->id,
+                // Un evento levantado por un ingeniero se autoasigna a él (fecha = creación).
+                'assigned_to'   => $user->hasRole('ingeniero') ? $user->id : null,
+                'assigned_at'   => $user->hasRole('ingeniero') ? now() : null,
                 'occurred_at'   => $this->resolveOccurredAt($data['occurred_at'] ?? null, now()),
             ]);
 
@@ -328,6 +333,16 @@ class EventController extends Controller
     public function show(Request $request, Event $event): JsonResponse
     {
         $this->authorizeAccess($request, $event);
+
+        // Corrección retroactiva: un evento levantado por un ingeniero que quedó sin
+        // asignar se autoasigna a su creador en este momento, con fecha de asignación =
+        // fecha de creación (cubre los eventos previos a la autoasignación en el alta).
+        if ($event->assigned_to === null && $event->creator?->hasRole('ingeniero')) {
+            $event->forceFill([
+                'assigned_to' => $event->created_by,
+                'assigned_at' => $event->created_at,
+            ])->saveQuietly();
+        }
 
         $event->load(['eventType', 'system:id,label', 'status', 'site:id,name,client_id',
             'client:id,name,short_name', 'device:id,name,device_type,location,custom_fields', 'creator:id,name', 'assignee:id,name',
@@ -599,7 +614,10 @@ class EventController extends Controller
         }
 
         DB::transaction(function () use ($event, $assigneeId, $assignee, $request) {
-            $event->update(['assigned_to' => $assigneeId]);
+            $event->update([
+                'assigned_to' => $assigneeId,
+                'assigned_at' => $assigneeId !== null ? now() : null,
+            ]);
 
             EventStatusHistory::create([
                 'event_id'       => $event->id,

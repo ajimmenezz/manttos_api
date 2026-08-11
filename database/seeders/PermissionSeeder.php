@@ -144,6 +144,7 @@ class PermissionSeeder extends Seeder
 
         // ── Actividades ─────────────────────────────────────────────
         'activities.view-registration-date',
+        'activities.set-execution-date', // fijar/editar la fecha de ejecución (actividades) y de ocurrencia (eventos), tope hoy
 
         // ── Sistema ─────────────────────────────────────────────────
         'config.manage',                // ajustes, SMTP, tema, calendario laboral (superadmin)
