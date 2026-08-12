@@ -180,7 +180,7 @@ class EventController extends Controller
             ->orderByRaw('COALESCE(events.occurred_at, events.created_at)')
             ->limit(2000)
             ->get(['id', 'folio', 'description', 'system_id', 'client_id', 'event_type_id', 'device_id',
-                   'status_id', 'priority', 'occurred_at', 'created_at', 'field_values']);
+                   'status_id', 'priority', 'occurred_at', 'created_at', 'field_values', 'images']);
 
         // DID por dispositivo (según el campo DID del sistema).
         $didKeyCache = [];
@@ -211,6 +211,7 @@ class EventController extends Controller
                 'assignee'      => optional($e->assignee)->name,
                 'description'   => $e->description,
                 'field_values'  => is_array($e->field_values) ? $e->field_values : [],
+                'images'        => is_array($e->images) ? array_values($e->images) : [],
             ];
         });
 
