@@ -448,6 +448,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/fields/{field}/toggle-status', [EventTypeController::class, 'toggleField']);
         Route::post('/fields/{field}/toggle-report', [EventTypeController::class, 'toggleReport']);
         Route::post('/fields/{field}/toggle-service-sheet', [EventTypeController::class, 'toggleServiceSheet']);
+        Route::post('/fields/{field}/toggle-bitacora', [EventTypeController::class, 'toggleBitacora']);
         Route::delete('/fields/{field}',            [EventTypeController::class, 'destroyField']);
         Route::post('/link',                        [EventTypeController::class, 'linkSystem']);
         Route::delete('/link',                      [EventTypeController::class, 'unlinkSystem']);

@@ -180,7 +180,7 @@ class EventController extends Controller
             ->orderByRaw('COALESCE(events.occurred_at, events.created_at)')
             ->limit(2000)
             ->get(['id', 'folio', 'description', 'system_id', 'client_id', 'event_type_id', 'device_id',
-                   'status_id', 'priority', 'occurred_at', 'created_at']);
+                   'status_id', 'priority', 'occurred_at', 'created_at', 'field_values']);
 
         // DID por dispositivo (según el campo DID del sistema).
         $didKeyCache = [];
@@ -193,23 +193,54 @@ class EventController extends Controller
                 $did = $cf[$key] ?? null;
             }
             return [
-                'id'          => $e->id,
-                'folio'       => $e->folio,
-                'occurred_at' => $e->occurred_at ?? $e->created_at,
-                'type'        => optional($e->eventType)->label,
-                'nature'      => optional($e->eventType)->nature,
-                'system'      => optional($e->system)->label,
-                'status'      => optional($e->status)->label,
-                'status_color'=> optional($e->status)->color,
-                'priority'    => $e->priority,
-                'device'      => optional($e->device)->name,
-                'device_type' => optional($e->device)->device_type,
-                'did'         => $did,
-                'creator'     => optional($e->creator)->name,
-                'assignee'    => optional($e->assignee)->name,
-                'description' => $e->description,
+                'id'            => $e->id,
+                'folio'         => $e->folio,
+                'occurred_at'   => $e->occurred_at ?? $e->created_at,
+                'event_type_id' => $e->event_type_id,
+                'system_id'     => $e->system_id,
+                'type'          => optional($e->eventType)->label,
+                'nature'        => optional($e->eventType)->nature,
+                'system'        => optional($e->system)->label,
+                'status'        => optional($e->status)->label,
+                'status_color'  => optional($e->status)->color,
+                'priority'      => $e->priority,
+                'device'        => optional($e->device)->name,
+                'device_type'   => optional($e->device)->device_type,
+                'did'           => $did,
+                'creator'       => optional($e->creator)->name,
+                'assignee'      => optional($e->assignee)->name,
+                'description'   => $e->description,
+                'field_values'  => is_array($e->field_values) ? $e->field_values : [],
             ];
         });
+
+        // Definiciones de los campos marcados para bitácora, por (tipo × sistema) presente.
+        // Se devuelven aquí (en vez de pedirlas al endpoint de configuración, gateado por
+        // event-config.manage) para que cualquier usuario con events.view arme la bitácora.
+        $pairs = $events->map(fn ($e) => $e->event_type_id . ':' . $e->system_id)->unique();
+        $fieldDefs = [];
+        if ($pairs->isNotEmpty()) {
+            $typeIds = $events->pluck('event_type_id')->unique()->filter();
+            $sysIds  = $events->pluck('system_id')->unique()->filter();
+            $defs = EventTypeField::whereIn('event_type_id', $typeIds)
+                ->whereIn('system_id', $sysIds)
+                ->where('is_active', true)
+                ->where('show_in_bitacora', true)
+                ->orderBy('sort_order')->orderBy('id')
+                ->get();
+            foreach ($defs as $f) {
+                $key = $f->event_type_id . ':' . $f->system_id;
+                if (! $pairs->contains($key)) continue;
+                $fieldDefs[$key][] = [
+                    'id'          => $f->id,
+                    'field_key'   => $f->field_key,
+                    'label'       => $f->label,
+                    'field_type'  => $f->field_type,
+                    'legend_text' => $f->legend_text,
+                    'config'      => $f->config ?? null,
+                ];
+            }
+        }
 
         return response()->json([
             'site' => [
@@ -217,10 +248,11 @@ class EventController extends Controller
                 'name'   => $site->name,
                 'client' => optional($site->client)->short_name ?: optional($site->client)->name,
             ],
-            'from'   => $from->toDateString(),
-            'to'     => $to->toDateString(),
-            'count'  => $rows->count(),
-            'events' => $rows,
+            'from'       => $from->toDateString(),
+            'to'         => $to->toDateString(),
+            'count'      => $rows->count(),
+            'events'     => $rows,
+            'field_defs' => $fieldDefs, // { "typeId:systemId": [ {field_key,label,field_type,config,...} ] }
         ]);
     }
 

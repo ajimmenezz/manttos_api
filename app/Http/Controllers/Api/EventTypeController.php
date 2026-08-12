@@ -215,6 +215,16 @@ class EventTypeController extends Controller
         return response()->json(['message' => 'Campo actualizado.', 'field' => $field]);
     }
 
+    /** Marca/desmarca el campo para imprimirse en la Bitácora de eventos. */
+    public function toggleBitacora(EventType $eventType, int $systemId, EventTypeField $field): JsonResponse
+    {
+        abort_unless(auth()->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');
+        abort_unless($field->event_type_id === $eventType->id && $field->system_id === $systemId, 404);
+        $field->update(['show_in_bitacora' => ! $field->show_in_bitacora]);
+        $status = $field->show_in_bitacora ? 'incluido en' : 'excluido de';
+        return response()->json(['message' => "Campo {$status} bitácora.", 'field' => $field]);
+    }
+
     public function reorderFields(Request $request, EventType $eventType, int $systemId): JsonResponse
     {
         abort_unless($request->user()->can('event-config.manage'), 403, 'No autorizado para esta acción.');

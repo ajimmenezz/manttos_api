@@ -34,6 +34,7 @@ class EventTypeField extends Model
         'is_active',
         'show_in_report',
         'show_in_service_sheet',
+        'show_in_bitacora',
     ];
 
     // Tipos de campo explotables como KPI/filtro en el Reporte de eventos.
@@ -46,6 +47,7 @@ class EventTypeField extends Model
             'is_active'      => 'boolean',
             'show_in_report' => 'boolean',
             'show_in_service_sheet' => 'boolean',
+            'show_in_bitacora' => 'boolean',
             'max_length'  => 'integer',
             'sort_order'  => 'integer',
             'rules'       => 'array',
