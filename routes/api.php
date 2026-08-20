@@ -59,6 +59,7 @@ use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\WorkCalendarController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\ReportSectionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SiteEngineerController;
@@ -498,6 +499,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/service-sheets/{serviceSheetExport}/download', [ServiceSheetExportController::class, 'download']);
 
     // Preferencias de UI por usuario (clave→JSON): p. ej. columnas del reporte de eventos
+    // Secciones visibles de los reportes-tablero por rol/usuario (config)
+    Route::get('/report-sections/catalog',                    [ReportSectionController::class, 'catalog']);
+    Route::get('/report-sections/{scopeType}/{scopeId}',      [ReportSectionController::class, 'show'])->whereNumber('scopeId');
+    Route::put('/report-sections/{scopeType}/{scopeId}',      [ReportSectionController::class, 'update'])->whereNumber('scopeId');
+
     Route::get('/me/preferences/{key}',   [UserPreferenceController::class, 'show']);
     Route::put('/me/preferences/{key}',   [UserPreferenceController::class, 'update']);
     Route::get('/events/sync-bundle',     [EventController::class, 'syncBundle']);  // antes del wildcard {event}

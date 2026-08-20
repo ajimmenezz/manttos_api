@@ -9,6 +9,7 @@ use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
 use App\Models\SystemField;
 use App\Models\User;
+use App\Support\ReportSections;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -113,7 +114,7 @@ class MaintenanceReportController extends Controller
             'count' => $activities->filter(fn ($a) => (int) Carbon::parse($a->performed_at)->format('G') === $h)->count(),
         ])->values();
 
-        return response()->json([
+        $payload = [
             'summary' => [
                 'total'       => $total,
                 'devices'     => $activities->pluck('device_id')->filter()->unique()->count(),
@@ -139,7 +140,13 @@ class MaintenanceReportController extends Controller
                     'dir_fields' => $this->buildDirFilterMeta($activities, $dirDefs),
                 ]
             ),
-        ]);
+        ];
+
+        // Recorte por rol/usuario: lo oculto ni siquiera viaja (ni a pantalla, ni a
+        // impresión). Ver App\Support\ReportSections.
+        $hidden = ReportSections::hiddenFor($request->user(), 'maintenances');
+
+        return response()->json(ReportSections::stripPayload($payload, 'maintenances', $hidden));
     }
 
     // ── Lista de detalle (tabla paginada) ─────────────────────────────────────
@@ -147,6 +154,7 @@ class MaintenanceReportController extends Controller
     public function reportList(Request $request): JsonResponse
     {
         abort_unless($request->user()->can('maintenances.report'), 403);
+        $this->assertSectionVisible($request, 'detail');
 
         [$activities, $formDefs, $dirDefs] = $this->collect($request);
         $cols = $this->columnDefs($activities, $formDefs, $dirDefs);
@@ -178,6 +186,7 @@ class MaintenanceReportController extends Controller
     public function export(Request $request): StreamedResponse
     {
         abort_unless($request->user()->can('maintenances.report'), 403);
+        $this->assertSectionVisible($request, 'detail');
         app(\App\Support\ActivityLogger::class)->log('maintenances', 'exported', 'Exportó el reporte de mantenimientos (Excel)', ['source' => 'request']);
 
         [$activities, $formDefs, $dirDefs] = $this->collect($request);
@@ -854,4 +863,18 @@ class MaintenanceReportController extends Controller
 
         return compact('clients', 'sites', 'systems', 'activityTypes', 'engineers', 'statuses', 'types');
     }
+
+    /**
+     * Las secciones ocultas para el rol/usuario tampoco se pueden pedir por endpoint
+     * (detalle paginado, Excel). Ver App\Support\ReportSections.
+     */
+    private function assertSectionVisible(Request $request, string $section): void
+    {
+        abort_if(
+            ReportSections::isHidden($request->user(), 'maintenances', $section),
+            403,
+            'Esta sección del reporte no está disponible para tu usuario.'
+        );
+    }
+
 }

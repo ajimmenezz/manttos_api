@@ -13,6 +13,7 @@ use App\Models\FloorPlan;
 use App\Models\SystemField;
 use App\Support\EventSla;
 use Carbon\Carbon;
+use App\Support\ReportSections;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -233,7 +234,7 @@ class EventDashboardController extends Controller
             ->map(fn ($d) => ['key' => $d['key'], 'header' => "{$d['system_label']} · {$d['type_label']} · {$d['label']}"])
             ->values();
 
-        return response()->json([
+        $payload = [
             'summary' => [
                 'total'               => $total,
                 'incidentes'          => $events->filter(fn ($e) => optional($e->eventType)->nature === 'incidente')->count(),
@@ -263,7 +264,13 @@ class EventDashboardController extends Controller
                 'linked' => $events->filter(fn ($e) => $e->device)->count(),
             ],
             'filters'       => array_merge($this->filterOptions($request), ['fields' => $fieldMeta, 'dir_fields' => $dirMeta]),
-        ]);
+        ];
+
+        // Recorte por rol/usuario: lo oculto ni siquiera viaja (ni a pantalla, ni a
+        // impresión). Ver App\Support\ReportSections.
+        $hidden = ReportSections::hiddenFor($request->user(), 'events');
+
+        return response()->json(ReportSections::stripPayload($payload, 'events', $hidden));
     }
 
     // ── Reporte por campos del formulario (KPI + filtros) ─────────────────────
@@ -794,6 +801,7 @@ class EventDashboardController extends Controller
     public function reportList(Request $request): JsonResponse
     {
         abort_unless($request->user()->can('events.view'), 403);
+        $this->assertSectionVisible($request, 'detail');
         $events   = $this->filteredEventsForList($request);
         $defs     = $this->reportColumnDefs($events);
         $resolved = $this->resolvedMap($events);
@@ -822,6 +830,7 @@ class EventDashboardController extends Controller
     public function export(Request $request): StreamedResponse
     {
         abort_unless($request->user()->can('events.view'), 403);
+        $this->assertSectionVisible($request, 'detail');
         app(\App\Support\ActivityLogger::class)->log('events', 'exported', 'Exportó el reporte de eventos (Excel)', ['source' => 'request']);
         $events   = $this->filteredEventsForList($request);
         $defs     = $this->reportColumnDefs($events);
@@ -876,6 +885,7 @@ class EventDashboardController extends Controller
     public function planDevices(Request $request): JsonResponse
     {
         abort_unless($request->user()->can('events.view'), 403);
+        $this->assertSectionVisible($request, 'plan_view');
         $request->validate(['site_id' => 'required|integer']);
 
         $events = $this->filteredEventsForPlan($request)->filter(fn ($e) => $e->device_id !== null);
@@ -1003,4 +1013,18 @@ class EventDashboardController extends Controller
 
         return compact('clients', 'sites', 'systems', 'types', 'statuses');
     }
+
+    /**
+     * Las secciones que el rol/usuario tiene ocultas tampoco se pueden pedir por
+     * endpoint (detalle paginado, Excel, vista de plano). Ver App\Support\ReportSections.
+     */
+    private function assertSectionVisible(Request $request, string $section): void
+    {
+        abort_if(
+            ReportSections::isHidden($request->user(), 'events', $section),
+            403,
+            'Esta sección del reporte no está disponible para tu usuario.'
+        );
+    }
+
 }
