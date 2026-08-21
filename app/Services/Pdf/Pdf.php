@@ -50,9 +50,13 @@ abstract class Pdf extends FPDF
 
     protected array $data;
     protected ?string $logo = null;
+    protected ?string $headerNote = null;
 
-    /** Cierra el documento con la línea de "Nombre y Firma de Conformidad". */
-    protected bool $signature = false;
+    /**
+     * Cierre de conformidad: 'end' = una línea al final del documento, 'page' = una
+     * en cada hoja, null = ninguna. Lo elige quien manda a imprimir.
+     */
+    protected ?string $signature = null;
 
     public function __construct(array $data)
     {
@@ -71,9 +75,17 @@ abstract class Pdf extends FPDF
      * Activa el cierre de conformidad. Es opcional en TODOS los imprimibles porque
      * unos se archivan firmados por el cliente y otros son de consulta interna.
      */
-    public function withSignature(bool $on = true): static
+    public function withSignature(?string $mode): static
     {
-        $this->signature = $on;
+        $this->signature = in_array($mode, ['end', 'page'], true) ? $mode : null;
+
+        return $this;
+    }
+
+    /** Encabezado a la derecha del membrete (folio, estado, total…). */
+    public function withHeaderNote(?string $note): static
+    {
+        $this->headerNote = $note;
 
         return $this;
     }
@@ -85,7 +97,10 @@ abstract class Pdf extends FPDF
     /** Las fuentes base de FPDF hablan cp1252; el sistema, UTF-8. */
     protected function t(?string $s): string
     {
-        return iconv('UTF-8', 'windows-1252//TRANSLIT', (string) $s) ?: '';
+        // OJO con `?:`: la cadena "0" es falsy en PHP y un KPI en cero saldría vacío.
+        $out = iconv('UTF-8', 'windows-1252//TRANSLIT', (string) $s);
+
+        return $out === false ? '' : $out;
     }
 
     protected function str(string $key): string
@@ -146,6 +161,13 @@ abstract class Pdf extends FPDF
             try { $this->Image($this->logo, self::MARGIN, 4, 0, 12); } catch (\Throwable) {}
         }
 
+        if ($this->headerNote) {
+            $this->ink([255, 255, 255]);
+            $this->SetFont('Arial', 'B', 12);
+            $this->SetXY(self::PAGE_W - self::MARGIN - 45, 5.5);
+            $this->Cell(45, 6, $this->fit($this->headerNote, 45), 0, 0, 'R');
+        }
+
         $this->ink([255, 255, 255]);
         $this->SetFont('Arial', 'B', 11);
         $this->SetXY(self::MARGIN + 22, 5);
@@ -162,6 +184,22 @@ abstract class Pdf extends FPDF
 
     public function Footer(): void
     {
+        if ($this->signature === 'page') {
+            $w = 90;
+            $x = self::MARGIN + (self::CONTENT_W - $w) / 2;
+            $y = $this->h - 22;
+
+            $this->draw(self::INK);
+            $this->SetLineWidth(0.3);
+            $this->Line($x, $y, $x + $w, $y);
+            $this->SetLineWidth(0.2);
+
+            $this->SetFont('Arial', '', 7.5);
+            $this->ink(self::INK);
+            $this->SetXY($x, $y + 1);
+            $this->Cell($w, 4, $this->t('Nombre y Firma de Conformidad'), 0, 0, 'C');
+        }
+
         $this->SetY(-12);
         $this->SetFont('Arial', '', 7.5);
         $this->ink(self::MUTED);
@@ -390,6 +428,197 @@ abstract class Pdf extends FPDF
         }
 
         $this->_out('h f');
+    }
+
+    /** Encabezado de sección dentro del documento (el "h2" de los imprimibles). */
+    protected function sectionTitle(string $text): void
+    {
+        $this->ensureSpace(14);
+
+        $this->SetFont('Arial', 'B', 8.5);
+        $this->ink(self::NAVY);
+        $this->SetXY(self::MARGIN, $this->y);
+        $this->Cell(self::CONTENT_W, 5, $this->fit(mb_strtoupper($text, 'UTF-8'), self::CONTENT_W), 0, 0, 'L');
+
+        $this->draw(self::LINE);
+        $this->Line(self::MARGIN, $this->y + 5.4, self::MARGIN + self::CONTENT_W, $this->y + 5.4);
+
+        $this->y += 8;
+    }
+
+    /**
+     * Rejilla de dato/valor a N columnas. `$rows` = [['label'=>…,'value'=>…], …].
+     * Los valores largos se envuelven en varias líneas y la fila crece con ellos.
+     */
+    protected function kvGrid(array $rows, int $cols = 3): void
+    {
+        if (! $rows) return;
+
+        $colW = self::CONTENT_W / $cols;
+
+        foreach (array_chunk($rows, $cols) as $chunk) {
+            $this->SetFont('Arial', 'B', 8);
+            $lines = 1;
+            foreach ($chunk as $cell) {
+                $lines = max($lines, count($this->wrap((string) ($cell['value'] ?? '-'), $colW - 4)));
+            }
+            $rowH = 5 + $lines * 4;
+            $this->ensureSpace($rowH + 2);
+
+            $y = $this->y;
+            foreach (array_values($chunk) as $i => $cell) {
+                $x = self::MARGIN + $i * $colW;
+
+                $this->SetFont('Arial', '', 6.5);
+                $this->ink(self::MUTED);
+                $this->SetXY($x, $y);
+                $this->Cell($colW - 4, 4, $this->fit(mb_strtoupper((string) $cell['label'], 'UTF-8'), $colW - 4), 0, 0, 'L');
+
+                $this->SetFont('Arial', 'B', 8);
+                $this->ink(self::INK);
+                $this->SetXY($x, $y + 3.6);
+                $this->MultiCell($colW - 4, 4, $this->t((string) ($cell['value'] ?? '')) ?: '-', 0, 'L');
+            }
+
+            $this->y = $y + $rowH;
+        }
+    }
+
+    /** Texto corrido que respeta saltos de línea y se parte por página. */
+    protected function paragraph(?string $text, float $size = 8): void
+    {
+        $text = trim((string) $text);
+        if ($text === '') return;
+
+        $this->SetFont('Arial', '', $size);
+        $this->ink(self::INK);
+
+        foreach ($this->wrap($text, self::CONTENT_W) as $line) {
+            $this->ensureSpace(6);
+            $this->SetXY(self::MARGIN, $this->y);
+            $this->Cell(self::CONTENT_W, 4.4, $line, 0, 0, 'L');
+            $this->y += 4.4;
+        }
+
+        $this->y += 1.5;
+    }
+
+    /**
+     * Tabla con encabezado que se repite al cambiar de página. `$cols` =
+     * [['label'=>…,'w'=>mm,'align'=>'L|R'], …]; `$rows` = arreglos de strings.
+     */
+    protected function table(array $cols, array $rows, float $size = 7.5): void
+    {
+        if (! $rows) {
+            $this->paragraph('Sin registros.', $size);
+            return;
+        }
+
+        $header = function () use ($cols, $size) {
+            $this->fill([244, 247, 251]);
+            $this->draw(self::LINE);
+            $this->SetFont('Arial', 'B', $size);
+            $this->ink(self::NAVY);
+
+            $x = self::MARGIN;
+            foreach ($cols as $c) {
+                $this->SetXY($x, $this->y);
+                $this->Cell($c['w'], 6, $this->fit((string) $c['label'], $c['w'] - 2), 1, 0, $c['align'] ?? 'L', true);
+                $x += $c['w'];
+            }
+            $this->y += 6;
+        };
+
+        $this->ensureSpace(18);
+        $header();
+
+        foreach ($rows as $row) {
+            $this->SetFont('Arial', '', $size);
+            $lines = 1;
+            foreach ($cols as $i => $c) {
+                $lines = max($lines, count($this->wrap((string) ($row[$i] ?? ''), $c['w'] - 3)));
+            }
+            $rowH = max(5.5, $lines * 4 + 1.5);
+
+            if ($this->y + $rowH > self::BOTTOM) {
+                $this->AddPage();
+                $header();
+            }
+
+            $x = self::MARGIN;
+            $y = $this->y;
+            foreach ($cols as $i => $c) {
+                $this->draw(self::LINE);
+                $this->Rect($x, $y, $c['w'], $rowH);
+
+                $this->SetFont('Arial', '', $size);
+                $this->ink(self::INK);
+                $this->SetXY($x + 1.5, $y + 1);
+                $this->MultiCell($c['w'] - 3, 4, $this->t((string) ($row[$i] ?? '')), 0, $c['align'] ?? 'L');
+                $x += $c['w'];
+            }
+
+            $this->y = $y + $rowH;
+        }
+
+        $this->y += 2;
+    }
+
+    /** Parte un texto en líneas que caben en `$w` con la fuente activa. */
+    protected function wrap(string $text, float $w): array
+    {
+        $out = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', $this->t($text)) as $paragraph) {
+            $line = '';
+            foreach (explode(' ', $paragraph) as $word) {
+                $try = $line === '' ? $word : "$line $word";
+                if ($this->GetStringWidth($try) <= $w) { $line = $try; continue; }
+                if ($line !== '') $out[] = $line;
+                $line = $word;
+            }
+            $out[] = $line;
+        }
+
+        return $out ?: [''];
+    }
+
+    /**
+     * Rejilla de imágenes (evidencia, firmas). Las que no se puedan dibujar se
+     * ignoran: una foto corrupta no debe tumbar el documento.
+     */
+    protected function imageGrid(array $images, int $cols = 4, float $h = 34): void
+    {
+        if (! $images) return;
+
+        $w = (self::CONTENT_W - ($cols - 1) * 3) / $cols;
+
+        foreach (array_chunk($images, $cols) as $chunk) {
+            $this->ensureSpace($h + 4);
+            $y = $this->y;
+
+            foreach (array_values($chunk) as $i => $img) {
+                $x = self::MARGIN + $i * ($w + 3);
+                try {
+                    $this->Image($img, $x, $y, $w, $h, $this->imageType($img));
+                    $this->draw(self::LINE);
+                    $this->Rect($x, $y, $w, $h);
+                } catch (\Throwable) {
+                    // imagen ilegible: se omite
+                }
+            }
+
+            $this->y = $y + $h + 3;
+        }
+    }
+
+    /** FPDF necesita el tipo cuando la "ruta" es un data-URI o no trae extensión. */
+    protected function imageType(string $img): string
+    {
+        if (str_starts_with($img, 'data:image/png')) return 'PNG';
+        if (str_starts_with($img, 'data:image/jpeg') || str_starts_with($img, 'data:image/jpg')) return 'JPEG';
+
+        return strtoupper(pathinfo(parse_url($img, PHP_URL_PATH) ?: $img, PATHINFO_EXTENSION)) === 'PNG' ? 'PNG' : 'JPEG';
     }
 
     /**

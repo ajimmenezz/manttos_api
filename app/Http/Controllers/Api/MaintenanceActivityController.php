@@ -256,6 +256,72 @@ class MaintenanceActivityController extends Controller
     /** GET /maintenances/{maintenance}/log?date_from=Y-m-d&date_to=Y-m-d
      *  Todas las actividades del mantenimiento en el rango de fechas (por performed_at)
      */
+    /**
+     * GET /maintenances/{maintenance}/log-pdf — la bitácora del mantenimiento en PDF,
+     * con la misma consulta y filtros que la pestaña.
+     */
+    public function logPdf(Request $request, Maintenance $maintenance): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $payload = $this->log($request, $maintenance)->getData(true);
+
+        $rows = array_map(function (array $e) {
+            $device = $e['device'] ?? null;
+            $values = $e['field_values'] ?? [];
+
+            $detail = [];
+            foreach ($values as $k => $v) {
+                if (str_starts_with((string) $k, '_')) continue;      // metadata interna
+                if (is_array($v)) $v = implode(', ', array_filter($v, 'is_scalar'));
+                if ($v === null || $v === '' || is_bool($v)) continue;
+                if (filter_var((string) $v, FILTER_VALIDATE_URL)) continue;  // imágenes/firmas
+                $detail[] = (string) $v;
+            }
+
+            return [
+                substr((string) ($e['performed_at'] ?? ''), 0, 10),
+                (string) ($e['activity_type']['label'] ?? ''),
+                (string) ($device['name'] ?? '—'),
+                (string) ($device['directory_name'] ?? ''),
+                (string) ($e['user']['name'] ?? ''),
+                mb_substr(implode(' · ', $detail), 0, 300),
+            ];
+        }, $payload['entries'] ?? []);
+
+        $maintenance->loadMissing(['site:id,name,client_id', 'site.client:id,name', 'system:id,label']);
+
+        $binary = (new \App\Services\Pdf\DashboardPdf([
+            'meta' => [
+                'title'        => 'Bitácora del mantenimiento',
+                'client'       => $maintenance->site?->client?->name,
+                'site'         => $maintenance->site?->name,
+                'system'       => $maintenance->system?->label,
+                'period_label' => $request->filled('date_from') || $request->filled('date_to')
+                    ? trim((string) $request->input('date_from')) . ' - ' . trim((string) $request->input('date_to'))
+                    : 'Todo el periodo',
+                'generated_at' => now()->toDateTimeString(),
+            ],
+            'kpis'   => [['label' => 'Capturas en el periodo', 'value' => (string) count($rows)]],
+            'blocks' => [[
+                'type'  => 'table',
+                'title' => 'Registro cronológico',
+                'cols'  => [
+                    ['label' => 'Fecha',       'w' => 20],
+                    ['label' => 'Actividad',   'w' => 30],
+                    ['label' => 'Dispositivo', 'w' => 34],
+                    ['label' => 'Directorio',  'w' => 28],
+                    ['label' => 'Capturó',     'w' => 30],
+                    ['label' => 'Detalle',     'w' => 48],
+                ],
+                'rows' => $rows,
+                'size' => 6.5,
+            ]],
+        ]))->withSignature($request->input('signature'))->render();
+
+        return response()->streamDownload(fn () => print($binary), 'bitacora-mantenimiento-' . $maintenance->id . '.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
     public function log(Request $request, Maintenance $maintenance): JsonResponse
     {
         $this->authorizeAccess($maintenance);

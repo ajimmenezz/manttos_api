@@ -49,6 +49,10 @@ class ServiceSheetExportController extends Controller
             // Branding por dominio (white-label): se resuelve aquí porque el Job corre en
             // la cola sin request, y allAsMap() sin tenant tomaría el 'default'.
             'tenant'       => \App\Support\Tenant::fromRequest($request),
+            // Cierre de conformidad elegido por quien solicita el ZIP.
+            'signature'    => in_array($request->input('signature'), ['end', 'page'], true)
+                ? $request->input('signature')
+                : null,
         ]);
 
         GenerateServiceSheetsZip::dispatch($export->id);

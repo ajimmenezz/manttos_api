@@ -6,14 +6,15 @@ use App\Models\Event;
 use App\Models\EventComment;
 use App\Models\EventTypeField;
 use App\Models\SystemField;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Genera el PDF de la hoja de servicio de un evento (equivalente server-side de la
- * página web events/[id]/hoja). Reúne los mismos datos (generales, dispositivo +
- * directorio, formulario, historial, comentarios, firmas), incrusta las imágenes como
- * data-URI (para que dompdf las muestre sin red) y renderiza la vista Blade a PDF.
+ * Hoja de servicio de un evento: reúne los datos (generales, dispositivo + directorio,
+ * formulario, evidencia, historial, comentarios, firmas) e incrusta las imágenes como
+ * data-URI para no depender de la red al dibujar.
+ *
+ * El dibujo lo hace ServiceSheetPdf (FPDF). Es la ÚNICA maqueta: la usan tanto la
+ * descarga individual como el ZIP por sitio, así que no pueden divergir.
  */
 class ServiceSheetRenderer
 {
@@ -21,14 +22,18 @@ class ServiceSheetRenderer
     private const IMPACT   = ['alto' => 'Alto', 'medio' => 'Medio', 'bajo' => 'Bajo'];
     private const URGENCY  = ['alta' => 'Alta', 'media' => 'Media', 'baja' => 'Baja'];
 
-    /** Devuelve los bytes del PDF de la hoja de servicio del evento. */
-    public function renderPdf(Event $event, array $branding = []): string
+    /**
+     * Bytes del PDF de la hoja de servicio.
+     * `$signature`: 'end' (una firma al final), 'page' (una por hoja) o null.
+     */
+    public function renderPdf(Event $event, array $branding = [], ?string $signature = null): string
     {
         $data = $this->buildData($event, $branding);
 
-        return Pdf::loadView('pdf.service-sheet', $data)
-            ->setPaper('letter')
-            ->output();
+        return (new ServiceSheetPdf($data))
+            ->withSignature($signature)
+            ->withHeaderNote($data['folio'] ?? null)
+            ->render();
     }
 
     private function buildData(Event $event, array $branding): array
@@ -100,6 +105,15 @@ class ServiceSheetRenderer
         ])->values()->all();
 
         return [
+            // Membrete común de los imprimibles (App\Services\Pdf\Pdf::Header).
+            'meta' => [
+                'title'        => 'Hoja de servicio',
+                'client'       => optional($event->client)->name,
+                'site'         => optional($event->site)->name,
+                'system'       => optional($event->system)->label,
+                'period_label' => 'Folio ' . $event->folio,
+                'generated_at' => now()->toDateTimeString(),
+            ],
             'appName'  => $branding['app_name'] ?? 'Mantenimientos',
             'logo'     => isset($branding['logo_url']) && $branding['logo_url'] ? $this->dataUri($branding['logo_url']) : null,
             'folio'    => $event->folio,

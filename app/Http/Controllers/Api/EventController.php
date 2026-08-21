@@ -472,6 +472,98 @@ class EventController extends Controller
     }
 
     // ─── Detalle ──────────────────────────────────────────────────
+    /**
+     * GET /events/{event}/service-sheet — la hoja de servicio en PDF, dibujada en el
+     * servidor con la MISMA maqueta que el ZIP por sitio (ServiceSheetRenderer).
+     * `signature`: 'end' | 'page' | vacío, según lo que pida quien la descarga.
+     */
+    /**
+     * GET /events/bitacora-pdf — la bitácora del sitio en PDF (misma consulta que la
+     * pantalla). Cronológica, un renglón por evento, con los campos marcados para
+     * bitácora resumidos en la última columna.
+     */
+    public function bitacoraPdf(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $payload = $this->bitacora($request)->getData(true);
+        $defs    = $payload['field_defs'] ?? [];
+
+        $rows = array_map(function (array $e) use ($defs) {
+            $key    = ($e['event_type_id'] ?? '') . ':' . ($e['system_id'] ?? '');
+            $values = $e['field_values'] ?? [];
+
+            $extra = [];
+            foreach ($defs[$key] ?? [] as $def) {
+                $v = $values[$def['field_key']] ?? null;
+                if (is_array($v)) $v = implode(', ', array_filter($v, 'is_scalar'));
+                if ($v === null || $v === '') continue;
+                $extra[] = $def['label'] . ': ' . $v;
+            }
+
+            $device = $e['device'] ?? null;
+
+            return [
+                substr((string) ($e['occurred_at'] ?? $e['created_at'] ?? ''), 0, 10),
+                (string) ($e['folio'] ?? ''),
+                (string) ($e['event_type']['label'] ?? ''),
+                (string) ($device['name'] ?? '—'),
+                (string) ($e['status']['label'] ?? ''),
+                trim((string) ($e['description'] ?? '') . ($extra ? "\n" . implode(' · ', $extra) : '')),
+            ];
+        }, $payload['events'] ?? []);
+
+        $binary = (new \App\Services\Pdf\DashboardPdf([
+            'meta' => [
+                'title'        => 'Bitácora de eventos',
+                'client'       => $payload['site']['client'] ?? null,
+                'site'         => $payload['site']['name'] ?? null,
+                'period_label' => $this->rangeLabel($payload['from'] ?? null, $payload['to'] ?? null),
+                'generated_at' => now()->toDateTimeString(),
+            ],
+            'kpis'   => [['label' => 'Eventos en el periodo', 'value' => (string) ($payload['count'] ?? 0)]],
+            'blocks' => [[
+                'type'  => 'table',
+                'title' => 'Registro cronológico',
+                'cols'  => [
+                    ['label' => 'Fecha',       'w' => 20],
+                    ['label' => 'Folio',       'w' => 30],
+                    ['label' => 'Tipo',        'w' => 26],
+                    ['label' => 'Dispositivo', 'w' => 32],
+                    ['label' => 'Estado',      'w' => 24],
+                    ['label' => 'Detalle',     'w' => 58],
+                ],
+                'rows' => $rows,
+                'size' => 6.5,
+            ]],
+        ]))->withSignature($request->input('signature'))->render();
+
+        return response()->streamDownload(fn () => print($binary), 'bitacora-de-eventos.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
+    private function rangeLabel(?string $from, ?string $to): string
+    {
+        $fmt = fn (?string $d) => $d ? \Carbon\Carbon::parse($d)->format('d/m/Y') : '…';
+
+        return $fmt($from) . ' - ' . $fmt($to);
+    }
+
+    public function serviceSheet(Request $request, Event $event): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $this->authorizeAccess($request, $event);
+
+        $branding = \App\Models\AppSetting::allAsMap(\App\Support\Tenant::fromRequest($request));
+
+        $binary = app(\App\Services\ServiceSheets\ServiceSheetRenderer::class)
+            ->renderPdf($event, $branding, $request->input('signature'));
+
+        return response()->streamDownload(
+            fn () => print($binary),
+            'hoja-de-servicio-' . \Illuminate\Support\Str::slug($event->folio) . '.pdf',
+            ['Content-Type' => 'application/pdf'],
+        );
+    }
+
     public function show(Request $request, Event $event): JsonResponse
     {
         $this->authorizeAccess($request, $event);

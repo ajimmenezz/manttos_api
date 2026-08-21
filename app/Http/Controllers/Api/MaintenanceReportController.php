@@ -149,6 +149,85 @@ class MaintenanceReportController extends Controller
         return response()->json(ReportSections::stripPayload($payload, 'maintenances', $hidden));
     }
 
+    /**
+     * GET /maintenances/report/pdf — el tablero dibujado por el servidor con FPDF,
+     * respetando filtros y secciones ocultas por rol/usuario.
+     */
+    public function reportPdf(Request $request): StreamedResponse
+    {
+        abort_unless($request->user()->can('maintenances.report'), 403);
+
+        $payload = $this->show($request)->getData(true);
+        $hidden  = $payload['hidden_sections'] ?? [];
+        $shows   = fn (string $k) => ! in_array($k, $hidden, true);
+
+        $s = $payload['summary'];
+        $kpis = array_values(array_filter([
+            $shows('kpi.total')     ? ['label' => 'Capturas de actividad', 'value' => number_format($s['total'], 0, ',', '.')] : null,
+            $shows('kpi.devices')   ? ['label' => 'Dispositivos atendidos', 'value' => number_format($s['devices'], 0, ',', '.')] : null,
+            $shows('kpi.engineers') ? ['label' => 'Ingenieros', 'value' => number_format($s['engineers'], 0, ',', '.')] : null,
+            $shows('kpi.sites')     ? ['label' => 'Sitios', 'value' => number_format($s['sites'], 0, ',', '.')] : null,
+        ]));
+
+        $bars = fn (string $title, array $rows, string $labelKey = 'label') => [
+            'type'  => 'bars',
+            'title' => $title,
+            'rows'  => array_map(fn ($r) => ['label' => $r[$labelKey] ?? '—', 'count' => $r['count'] ?? 0], $rows),
+        ];
+
+        $blocks = [];
+        if ($shows('weekly') && $payload['weekly']) {
+            $blocks[] = ['type' => 'timeline', 'title' => 'Capturas por semana', 'rows' => $payload['weekly']];
+        }
+        if ($shows('by_hour')) {
+            $blocks[] = ['type' => 'timeline', 'title' => 'Horarios de captura', 'rows' => array_map(
+                fn ($r) => ['label' => substr((string) $r['label'], 0, 2), 'month' => 'Hora del día', 'count' => $r['count']],
+                $payload['by_hour'],
+            )];
+        }
+        if ($shows('by_activity_type'))      $blocks[] = $bars('Por tipo de actividad', $payload['by_activity_type']);
+        if ($shows('by_maintenance_status')) $blocks[] = $bars('Por estado del mantenimiento', $payload['by_maintenance_status']);
+        if ($shows('by_system'))             $blocks[] = $bars('Por sistema', $payload['by_system']);
+        if ($shows('rank_engineer'))         $blocks[] = $bars('Ranking por ingeniero', $payload['by_engineer'], 'name');
+        if ($shows('rank_client'))           $blocks[] = $bars('Ranking por cliente', $payload['by_client'], 'name');
+        if ($shows('rank_site'))             $blocks[] = $bars('Ranking por sitio', $payload['by_site'], 'name');
+
+        if ($shows('detail')) {
+            $detail = $this->reportList($request->merge(['per_page' => 200, 'page' => 1]))->getData(true);
+            $cols   = array_slice($detail['columns'], 0, 7);
+            $w      = 190 / max(1, count($cols));
+
+            $blocks[] = [
+                'type'  => 'table',
+                'title' => 'Detalle de capturas (' . number_format($detail['pagination']['total'], 0, ',', '.') . ')',
+                'cols'  => array_map(fn ($c) => ['label' => $c['header'], 'w' => $w], $cols),
+                'rows'  => array_map(
+                    fn ($row) => array_map(fn ($c) => (string) ($row[$c['key']] ?? ''), $cols),
+                    $detail['rows'],
+                ),
+                'size'  => 6.5,
+            ];
+        }
+
+        $from = $request->input('date_from');
+        $to   = $request->input('date_to');
+        $fmt  = fn ($d) => $d ? Carbon::parse($d)->format('d/m/Y') : '…';
+
+        $binary = (new \App\Services\Pdf\DashboardPdf([
+            'meta' => [
+                'title'        => 'Reporte de mantenimientos',
+                'period_label' => ($from || $to) ? $fmt($from) . ' - ' . $fmt($to) : 'Todo el periodo',
+                'generated_at' => now()->toDateTimeString(),
+            ],
+            'kpis'   => $kpis,
+            'blocks' => $blocks,
+        ]))->withSignature($request->input('signature'))->render();
+
+        return response()->streamDownload(fn () => print($binary), 'reporte-de-mantenimientos.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
     // ── Lista de detalle (tabla paginada) ─────────────────────────────────────
 
     public function reportList(Request $request): JsonResponse

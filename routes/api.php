@@ -491,9 +491,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/events/export',          [EventDashboardController::class, 'export']); // antes del wildcard {event}
     Route::get('/events/report-list',     [EventDashboardController::class, 'reportList']); // antes del wildcard {event}
     Route::get('/events/plan-devices',    [EventDashboardController::class, 'planDevices']); // antes del wildcard {event}
+    Route::get('/events/report-pdf',      [EventDashboardController::class, 'reportPdf']); // antes del wildcard {event}
     // Sitios accesibles (selectores de hojas de servicio / bitácora) + Bitácora de eventos
     Route::get('/events/sites',    [EventController::class, 'sites']);    // antes del wildcard {event}
     Route::get('/events/bitacora', [EventController::class, 'bitacora']); // antes del wildcard {event}
+    Route::get('/events/bitacora-pdf', [EventController::class, 'bitacoraPdf']); // antes del wildcard {event}
+    Route::get('/events/{event}/service-sheet', [EventController::class, 'serviceSheet']);
     // Exportación en ZIP de hojas de servicio (segundo plano) — antes del wildcard {event}
     Route::post('/events/service-sheets',                 [ServiceSheetExportController::class, 'store']);
     Route::get('/events/service-sheets/{serviceSheetExport}',          [ServiceSheetExportController::class, 'show']);
@@ -598,6 +601,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/report',        [MaintenanceReportController::class, 'show']);
     Route::get('/maintenances/report/list',   [MaintenanceReportController::class, 'reportList']);
     Route::get('/maintenances/report/export', [MaintenanceReportController::class, 'export']);
+    Route::get('/maintenances/report/pdf',    [MaintenanceReportController::class, 'reportPdf']);
 
     Route::get('/maintenances/{maintenance}', [MaintenanceController::class, 'show']);
     Route::post('/maintenances/{maintenance}/archive', [MaintenanceController::class, 'archive']); // archivar (fuera de listas)
@@ -628,6 +632,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/activity-counts',  [MaintenanceActivityController::class, 'activityCounts']);
     Route::get('/maintenances/{maintenance}/floor-plans',      [MaintenanceActivityController::class, 'floorPlans']);
     Route::get('/maintenances/{maintenance}/log',              [MaintenanceActivityController::class, 'log']);
+    Route::get('/maintenances/{maintenance}/log-pdf', [MaintenanceActivityController::class, 'logPdf']);
     Route::get('/maintenances/{maintenance}/activities/export', [MaintenanceActivityController::class, 'export']);
     Route::get('/maintenances/{maintenance}/activities/{activity}',       [MaintenanceActivityController::class, 'show']);
     Route::post('/maintenances/{maintenance}/activities/{activity}/retype', [MaintenanceActivityController::class, 'retype']);

@@ -273,6 +273,122 @@ class EventDashboardController extends Controller
         return response()->json(ReportSections::stripPayload($payload, 'events', $hidden));
     }
 
+    /**
+     * GET /events/report-pdf — el mismo tablero, dibujado por el servidor con FPDF.
+     * Respeta los filtros y las secciones ocultas por rol/usuario: lo que no se ve en
+     * pantalla tampoco sale impreso.
+     */
+    public function reportPdf(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        abort_unless($request->user()->can('events.view'), 403);
+
+        $payload = $this->show($request)->getData(true);
+        $hidden  = $payload['hidden_sections'] ?? [];
+        $shows   = fn (string $k) => ! in_array($k, $hidden, true);
+
+        $s = $payload['summary'];
+        $kpis = array_values(array_filter([
+            $shows('kpi.total')          ? ['label' => 'Eventos totales', 'value' => number_format($s['total'], 0, ',', '.')] : null,
+            $shows('kpi.abiertos')       ? ['label' => 'Abiertos', 'value' => number_format($s['abiertos'], 0, ',', '.')] : null,
+            $shows('kpi.resueltos')      ? ['label' => 'Resueltos', 'value' => number_format($s['resueltos'], 0, ',', '.')] : null,
+            $shows('kpi.avg_resolution') ? ['label' => 'Días prom. resolución', 'value' => (string) ($s['avg_resolution_days'] ?? '—')] : null,
+        ]));
+
+        $bars = fn (string $title, array $rows, string $labelKey = 'label') => [
+            'type'  => 'bars',
+            'title' => $title,
+            'rows'  => array_map(fn ($r) => ['label' => $r[$labelKey] ?? '—', 'count' => $r['count'] ?? 0], $rows),
+        ];
+
+        $blocks = [];
+        if ($shows('weekly') && $payload['weekly']) {
+            $blocks[] = ['type' => 'timeline', 'title' => 'Volumen de eventos por semana', 'rows' => $payload['weekly']];
+        }
+        if ($shows('by_status'))     $blocks[] = $bars('Por estado', $payload['by_status']);
+        if ($shows('by_priority'))   $blocks[] = $bars('Por prioridad', $payload['by_priority']);
+        if ($shows('by_nature'))     $blocks[] = $bars('Incidentes vs. solicitudes', array_map(
+            fn ($r) => ['label' => ucfirst((string) ($r['nature'] ?? 'Sin tipo')), 'count' => $r['count']], $payload['by_nature']));
+        if ($shows('by_event_type')) $blocks[] = $bars('Por tipo de evento', $payload['by_event_type']);
+        if ($shows('by_impact'))     $blocks[] = $bars('Por impacto', array_map(
+            fn ($r) => ['label' => ucfirst((string) ($r['impact'] ?? '—')), 'count' => $r['count']], $payload['by_impact']));
+        if ($shows('by_urgency'))    $blocks[] = $bars('Por urgencia', array_map(
+            fn ($r) => ['label' => ucfirst((string) ($r['urgency'] ?? '—')), 'count' => $r['count']], $payload['by_urgency']));
+        if ($shows('rank_system'))   $blocks[] = $bars('Ranking por sistema', $payload['by_system']);
+        if ($shows('rank_client'))   $blocks[] = $bars('Ranking por cliente', $payload['by_client'], 'name');
+        if ($shows('rank_site'))     $blocks[] = $bars('Ranking por sitio', $payload['by_site'], 'name');
+
+        if ($shows('sla.by_tier') && ! empty($payload['sla']['by_tier'])) {
+            $blocks[] = [
+                'type'  => 'table',
+                'title' => 'Cumplimiento por nivel de atención',
+                'cols'  => [
+                    ['label' => 'Nivel', 'w' => 60],
+                    ['label' => 'En tiempo', 'w' => 26, 'align' => 'R'],
+                    ['label' => 'Fuera de SLA', 'w' => 28, 'align' => 'R'],
+                    ['label' => 'Vencidos', 'w' => 26, 'align' => 'R'],
+                    ['label' => 'Pendientes', 'w' => 26, 'align' => 'R'],
+                    ['label' => '% Cumpl.', 'w' => 24, 'align' => 'R'],
+                ],
+                'rows' => array_map(fn ($t) => [
+                    $t['label'], $t['met'], $t['breached'], $t['overdue'], $t['pending'],
+                    $t['compliance_pct'] === null ? '—' : $t['compliance_pct'] . '%',
+                ], $payload['sla']['by_tier']),
+            ];
+        }
+
+        // Detalle: se imprime la misma lista filtrada, acotada para que el PDF siga
+        // siendo un entregable y no un volcado de miles de renglones.
+        if ($shows('detail')) {
+            $detail = $this->reportList($request->merge(['per_page' => 200, 'page' => 1]))->getData(true);
+            $cols   = array_slice($detail['columns'], 0, 7);
+            $w      = self::CONTENT_W_PDF / max(1, count($cols));
+
+            $blocks[] = [
+                'type'  => 'table',
+                'title' => 'Detalle de eventos (' . number_format($detail['pagination']['total'], 0, ',', '.') . ')',
+                'cols'  => array_map(fn ($c) => ['label' => $c['header'], 'w' => $w], $cols),
+                'rows'  => array_map(
+                    fn ($row) => array_map(fn ($c) => (string) ($row[$c['key']] ?? ''), $cols),
+                    $detail['rows'],
+                ),
+                'size'  => 6.5,
+            ];
+        }
+
+        $binary = (new \App\Services\Pdf\DashboardPdf([
+            'meta' => [
+                'title'        => 'Reporte de eventos',
+                'client'       => null,
+                'site'         => null,
+                'system'       => null,
+                'period_label' => $this->periodLabel($request),
+                'generated_at' => now()->toDateTimeString(),
+            ],
+            'kpis'   => $kpis,
+            'blocks' => $blocks,
+        ]))->withSignature($request->input('signature'))->render();
+
+        return response()->streamDownload(fn () => print($binary), 'reporte-de-eventos.pdf', [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
+    /** Ancho útil del PDF (A4 menos márgenes), para repartir columnas. */
+    private const CONTENT_W_PDF = 190;
+
+    /** Texto del periodo para el membrete del PDF. */
+    private function periodLabel(Request $request): string
+    {
+        $from = $request->input('date_from');
+        $to   = $request->input('date_to');
+
+        if (! $from && ! $to) return 'Todo el periodo';
+
+        $fmt = fn ($d) => $d ? Carbon::parse($d)->format('d/m/Y') : '…';
+
+        return $fmt($from) . ' - ' . $fmt($to);
+    }
+
     // ── Reporte por campos del formulario (KPI + filtros) ─────────────────────
 
     /** Definiciones de los campos marcados con show_in_report, por (sistema×tipo×campo). */
