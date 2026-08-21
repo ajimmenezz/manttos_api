@@ -21,10 +21,17 @@ return [
     // Dónde se guardan los ZIP generados (relativo al disco 'local').
     'path' => 'snapshots',
 
-    // Carpetas de storage que viajan en el ZIP. Son las que alimentan las URLs
-    // públicas del sistema; sin ellas el clon queda sin imágenes.
+    // Carpetas de storage que viajan en el ZIP.
+    //   app/public  → lo que sirve por URL: fotos de evidencia, imágenes de planos,
+    //                 firmas, logos, archivos de contrato.
+    //   app/private → lo que NO es público pero sí es dato: documentos de la base de
+    //                 conocimiento (referenciados por ai_documents.file_path) y los
+    //                 ZIP de hojas de servicio ya generados.
+    // Si aparece un disco nuevo en config/filesystems.php, hay que darlo de alta aquí
+    // o el clon nacerá incompleto.
     'media' => [
         'app/public',
+        'app/private',
     ],
 
     /*

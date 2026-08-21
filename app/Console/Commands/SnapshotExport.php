@@ -52,6 +52,8 @@ class SnapshotExport extends Command
 
             $this->newLine();
             $this->info('Snapshot listo:');
+            $counts = $this->counts();
+            $this->line('  ' . number_format(array_sum($counts)) . ' registros en ' . count($counts) . ' tablas');
             $this->line('  ' . $zipPath);
             $this->line('  ' . $this->human(filesize($zipPath)));
             $this->newLine();
@@ -134,6 +136,9 @@ class SnapshotExport extends Command
             'pg_version'   => $this->serverVersion(),
             'last_migration'=> $this->lastMigration(),
             'media_files'  => count($media),
+            'media_bytes'  => array_sum(array_map('filesize', array_keys($media))),
+            // Conteo de TODAS las tablas: es contra esto que el import verifica que no
+            // se haya quedado nada en el camino.
             'counts'       => $this->counts(),
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
@@ -156,20 +161,34 @@ class SnapshotExport extends Command
         return sprintf('snapshot-%s-%s.zip', $database, now()->format('Ymd-His'));
     }
 
-    /** Conteos rápidos para saber de un vistazo qué trae el ZIP. */
+    /**
+     * Conteo exacto de todas las tablas del esquema público. Sirve para dos cosas:
+     * ver de un vistazo qué trae el ZIP y, sobre todo, que el import pueda verificar
+     * registro por registro que la copia quedó completa.
+     */
+    private ?array $countsCache = null;
+
     private function counts(): array
     {
+        if ($this->countsCache !== null) return $this->countsCache;
+
         $out = [];
 
-        foreach (['users', 'clients', 'sites', 'devices', 'maintenance_activities', 'events'] as $table) {
+        try {
+            $tables = \DB::select("select tablename from pg_tables where schemaname = 'public' order by tablename");
+        } catch (\Throwable) {
+            return $this->countsCache = $out;
+        }
+
+        foreach ($tables as $row) {
             try {
-                $out[$table] = \DB::table($table)->count();
+                $out[$row->tablename] = \DB::table($row->tablename)->count();
             } catch (\Throwable) {
-                // tabla ausente en instalaciones viejas: no es motivo para fallar
+                // una vista o tabla sin permiso no debe tumbar el respaldo
             }
         }
 
-        return $out;
+        return $this->countsCache = $out;
     }
 
     private function serverVersion(): ?string

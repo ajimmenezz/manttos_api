@@ -78,11 +78,15 @@ class SnapshotImport extends Command
             }
 
             // Con --database, Eloquent sigue apuntando a la base de la conexión: el
-            // saneo (y cualquier consulta posterior) tiene que mirar a la restaurada.
+            // saneo (y la verificación) tienen que mirar a la restaurada.
             if ($this->option('database')) {
                 config(['database.connections.' . config('database.default') . '.database' => $conn['database']]);
                 DB::purge();
             }
+
+            // La verificación va ANTES del saneo: el saneo vacía tokens a propósito y
+            // enturbiaría la comparación.
+            $ok = $this->verify($manifest);
 
             if ($sanitize) {
                 $this->info('Saneando el clon…');
@@ -103,7 +107,8 @@ class SnapshotImport extends Command
             File::deleteDirectory($temp);
 
             $this->newLine();
-            $this->info('Snapshot restaurado.');
+            $ok ? $this->info('Snapshot restaurado y verificado.')
+                : $this->warn('Snapshot restaurado CON DIFERENCIAS (ver arriba).');
             if ($sanitize) {
                 $this->line('  Todos los usuarios quedaron con la contraseña: ' . $this->password());
             }
@@ -136,8 +141,14 @@ class SnapshotImport extends Command
         $this->line('  base:     ' . ($manifest['database'] ?? '—'));
         $this->line('  archivos: ' . ($manifest['media_files'] ?? 0));
 
-        foreach ($manifest['counts'] ?? [] as $table => $count) {
-            $this->line(sprintf('    %-24s %s', $table, number_format($count)));
+        // Resumen legible: las tablas que le dicen algo a una persona. La comparación
+        // completa (todas las tablas) la hace verify() al terminar.
+        $counts = $manifest['counts'] ?? [];
+        foreach (['users', 'clients', 'sites', 'devices', 'floor_plans', 'device_placements', 'maintenance_activities', 'events'] as $table) {
+            if (isset($counts[$table])) $this->line(sprintf('    %-24s %s', $table, number_format($counts[$table])));
+        }
+        if ($counts) {
+            $this->line(sprintf('    %-24s %s en %d tablas', 'TOTAL', number_format(array_sum($counts)), count($counts)));
         }
 
         $this->newLine();
@@ -273,6 +284,57 @@ class SnapshotImport extends Command
         }
 
         if ($changed) $this->line("  URLs reapuntadas a {$target}: {$changed} registros");
+    }
+
+    /**
+     * Compara tabla por tabla lo que decía el manifiesto contra lo que quedó en la
+     * base, y los archivos del ZIP contra los que aterrizaron en disco. Es la
+     * diferencia entre "creo que se copió todo" y saberlo.
+     */
+    private function verify(array $manifest): bool
+    {
+        $expected = $manifest['counts'] ?? [];
+        if (! $expected) {
+            $this->warn('  El respaldo no trae conteos: no se puede verificar (snapshot de una versión anterior).');
+
+            return true;
+        }
+
+        $this->info('Verificando la copia…');
+
+        $diffs = [];
+        $rows  = 0;
+
+        foreach ($expected as $table => $count) {
+            try {
+                $actual = DB::table($table)->count();
+            } catch (\Throwable) {
+                $diffs[] = "{$table}: la tabla no existe en el destino (esperaba {$count})";
+                continue;
+            }
+
+            $rows += $actual;
+            if ($actual !== $count) $diffs[] = "{$table}: esperaba {$count}, quedaron {$actual}";
+        }
+
+        $this->line('  ' . number_format($rows) . ' registros en ' . count($expected) . ' tablas');
+
+        if (! $this->option('no-media') && ($expectedFiles = $manifest['media_files'] ?? 0) > 0) {
+            $actualFiles = 0;
+            foreach (config('snapshot.media', []) as $relative) {
+                $dir = storage_path($relative);
+                if (is_dir($dir)) $actualFiles += count(File::allFiles($dir));
+            }
+
+            $this->line("  {$actualFiles} archivos en disco (el respaldo traía {$expectedFiles})");
+            if ($actualFiles < $expectedFiles) {
+                $diffs[] = "archivos: el respaldo traía {$expectedFiles} y hay {$actualFiles}";
+            }
+        }
+
+        foreach ($diffs as $diff) $this->error('  ' . $diff);
+
+        return $diffs === [];
     }
 
     private function password(): string
