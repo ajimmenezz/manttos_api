@@ -94,6 +94,13 @@ Route::post('/whatsapp/webhook', [WhatsAppWebhookController::class, 'handle']);
 // de entrada de cada integración; el controlador valida y encola el procesamiento.
 Route::post('/integrations/{provider}/inbound', [IntegrationInboundController::class, 'handle']);
 
+// Descarga de un respaldo con enlace TEMPORAL FIRMADO: la baja el navegador, no la
+// app, así que no lleva token. La firma la emite /snapshots/{name}/download-link a
+// un usuario con permiso, y el controlador revalida ese permiso al servir.
+Route::get('/snapshots/{name}/file', [SnapshotController::class, 'file'])
+    ->middleware('signed')
+    ->name('snapshots.file');
+
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -509,7 +516,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/snapshots',                    [SnapshotController::class, 'index']);
     Route::post('/snapshots',                   [SnapshotController::class, 'store']);
     Route::post('/snapshots/upload',            [SnapshotController::class, 'upload']);
-    Route::get('/snapshots/{name}/download',    [SnapshotController::class, 'download']);
+    Route::get('/snapshots/{name}/download-link', [SnapshotController::class, 'downloadLink']);
     Route::post('/snapshots/{name}/import',     [SnapshotController::class, 'import']);
     Route::delete('/snapshots/{name}',          [SnapshotController::class, 'destroy']);
 

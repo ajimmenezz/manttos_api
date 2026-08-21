@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateSnapshot;
+use App\Models\SnapshotExport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -74,6 +76,11 @@ class SnapshotController extends Controller
             // Si el servidor no puede invocar pg_dump/psql, más vale decirlo ANTES de
             // que alguien apriete el botón (Plesk: open_basedir / proc_open).
             'tools'   => $this->pgToolsStatus(),
+            // Respaldos en curso o recién terminados: la pantalla los sondea para
+            // avisar en cuanto el ZIP está listo.
+            'jobs'    => SnapshotExport::latest('id')->limit(5)->get([
+                'id', 'status', 'file_name', 'size', 'error', 'created_at', 'updated_at',
+            ]),
         ]);
     }
 
@@ -97,52 +104,79 @@ class SnapshotController extends Controller
         ];
     }
 
-    /** POST /snapshots — genera el ZIP en el servidor. */
+    /**
+     * POST /snapshots — encola la generación del ZIP.
+     *
+     * No se genera aquí mismo: en una instalación con años de fotos esto tarda
+     * minutos y la petición moriría por timeout. Se responde de inmediato y el aviso
+     * llega por la campanita cuando el archivo está listo.
+     */
     public function store(Request $request): JsonResponse
     {
         $this->assertAllowed($request);
 
-        @set_time_limit(0);
-
-        $before = collect(File::files($this->directory()))->map->getFilename()->all();
-
-        try {
-            $status = Artisan::call('snapshot:export', array_filter([
-                '--no-media' => $request->boolean('no_media'),
-            ]));
-        } catch (\Throwable $e) {
-            return response()->json(['message' => $e->getMessage()], 500);
+        // Si el servidor no puede invocar pg_dump, mejor decirlo ahora que dejar un
+        // job fallando en segundo plano.
+        $tools = $this->pgToolsStatus();
+        if (empty($tools['pg_dump'])) {
+            return response()->json(['message' => $tools['error'] ?? 'Este servidor no puede generar respaldos.'], 422);
         }
 
-        $output = Artisan::output();
-
-        if ($status !== 0) {
+        if ($running = SnapshotExport::whereIn('status', [SnapshotExport::STATUS_PENDING, SnapshotExport::STATUS_PROCESSING])->first()) {
             return response()->json([
-                'message' => trim($output) ?: 'No se pudo generar el respaldo.',
-                'output'  => $output,
-            ], 500);
+                'message' => 'Ya hay un respaldo generándose. Te avisamos cuando termine.',
+                'job'     => $running,
+            ], 202);
         }
 
-        $file = collect(File::files($this->directory()))
-            ->reject(fn ($f) => in_array($f->getFilename(), $before, true))
-            ->sortByDesc(fn ($f) => $f->getMTime())
-            ->first();
+        $database = config('database.connections.' . config('database.default') . '.database');
+
+        $export = SnapshotExport::create([
+            'status'       => SnapshotExport::STATUS_PENDING,
+            'file_name'    => sprintf('snapshot-%s-%s.zip', $database, now()->format('Ymd-His')),
+            'no_media'     => $request->boolean('no_media'),
+            'requested_by' => $request->user()->id,
+        ]);
+
+        GenerateSnapshot::dispatch($export->id);
 
         return response()->json([
-            'message' => 'Respaldo generado.',
-            'file'    => $file ? [
-                'name'       => $file->getFilename(),
-                'size'       => $file->getSize(),
-                'created_at' => date('c', $file->getMTime()),
-            ] : null,
-            'output'  => $output,
-        ], 201);
+            'message' => 'El respaldo se está generando. Te avisamos en la campanita cuando esté listo.',
+            'job'     => $export->fresh(),
+        ], 202);
     }
 
-    /** GET /snapshots/{name}/download */
-    public function download(Request $request, string $name): BinaryFileResponse
+    /**
+     * GET /snapshots/{name}/download-link — enlace temporal firmado.
+     *
+     * La descarga NO puede ir por XHR: el navegador esperaría a tener el ZIP entero
+     * en memoria, sin barra de progreso y sin poder cancelarlo, y cada clic repetido
+     * pondría al servidor a leer el archivo otra vez. Con un enlace firmado la baja
+     * el navegador como cualquier descarga: progreso, reanudable y sin pasar por JS.
+     */
+    public function downloadLink(Request $request, string $name): JsonResponse
     {
         $this->assertAllowed($request);
+        $this->resolve($name);   // valida nombre y existencia antes de firmar
+
+        return response()->json([
+            'url' => URL::temporarySignedRoute('snapshots.file', now()->addMinutes(15), [
+                'name' => $name,
+                'u'    => $request->user()->id,
+            ]),
+        ]);
+    }
+
+    /**
+     * GET /snapshots/{name}/file — la descarga en sí, autorizada por la firma del
+     * enlace (no lleva token: la pide el navegador, no la app). Se revalida que el
+     * usuario del enlace siga teniendo el permiso.
+     */
+    public function file(Request $request, string $name): BinaryFileResponse
+    {
+        $user = \App\Models\User::find($request->integer('u'));
+
+        abort_unless($user && $user->can('snapshot.manage'), 403, 'No autorizado para esta descarga.');
 
         return response()->download($this->resolve($name));
     }
