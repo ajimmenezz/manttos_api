@@ -149,6 +149,7 @@ class PermissionSeeder extends Seeder
         // ── Sistema ─────────────────────────────────────────────────
         'config.manage',                // ajustes, SMTP, tema, calendario laboral (superadmin)
         'audit.view',                   // consultar la auditoría del sistema (sensible; superadmin por defecto)
+        'snapshot.manage',              // exportar/importar TODA la instalación (superadmin; puede reemplazar la base)
         'report-sections.manage',       // qué secciones de los reportes-tablero ve cada rol/usuario
         'reports.executive',            // generar el reporte ejecutivo por sitio (PDF para el cliente)
 

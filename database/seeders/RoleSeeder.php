@@ -101,6 +101,7 @@ class RoleSeeder extends Seeder
                 ->where('name', '!=', 'config.manage')
                 ->where('name', '!=', 'devices.apply-change')
                 ->where('name', '!=', 'audit.view') // auditoría: superadmin-only por defecto (grantable por UI)
+                ->where('name', '!=', 'snapshot.manage') // respaldos: se lleva o reemplaza TODA la base
                 ->where('name', 'not like', '%.archive')
                 ->where('name', 'not like', 'integrations.%')
                 ->get()

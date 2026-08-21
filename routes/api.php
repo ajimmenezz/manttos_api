@@ -63,6 +63,7 @@ use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ReportSectionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SiteController;
+use App\Http\Controllers\Api\SnapshotController;
 use App\Http\Controllers\Api\SiteEngineerController;
 use App\Http\Controllers\Api\SiteUserController;
 use App\Http\Controllers\Api\UserController;
@@ -504,6 +505,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Preferencias de UI por usuario (clave→JSON): p. ej. columnas del reporte de eventos
     // Secciones visibles de los reportes-tablero por rol/usuario (config)
+    // Respaldos portables de toda la instalación (superadmin)
+    Route::get('/snapshots',                    [SnapshotController::class, 'index']);
+    Route::post('/snapshots',                   [SnapshotController::class, 'store']);
+    Route::post('/snapshots/upload',            [SnapshotController::class, 'upload']);
+    Route::get('/snapshots/{name}/download',    [SnapshotController::class, 'download']);
+    Route::post('/snapshots/{name}/import',     [SnapshotController::class, 'import']);
+    Route::delete('/snapshots/{name}',          [SnapshotController::class, 'destroy']);
+
     Route::get('/report-sections/catalog',                    [ReportSectionController::class, 'catalog']);
     Route::get('/report-sections/{scopeType}/{scopeId}',      [ReportSectionController::class, 'show'])->whereNumber('scopeId');
     Route::put('/report-sections/{scopeType}/{scopeId}',      [ReportSectionController::class, 'update'])->whereNumber('scopeId');
