@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Respaldos portables generados con snapshot:export (pueden pesar GB)
+/storage/app/snapshots
