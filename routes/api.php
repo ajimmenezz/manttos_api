@@ -49,6 +49,7 @@ use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
 use App\Http\Controllers\Api\ServiceSheetExportController;
 use App\Http\Controllers\Api\EventTypeController;
+use App\Http\Controllers\Api\ExecutiveReportController;
 use App\Http\Controllers\Api\UserPreferenceController;
 use App\Http\Controllers\Api\EventStatusController;
 use App\Http\Controllers\Api\EventSlaController;
@@ -584,6 +585,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vista consolidada de mantenimientos (scope por rol)
     Route::get('/my-maintenances',          [MaintenanceController::class, 'myMaintenances']);
     Route::post('/my-maintenances',         [MaintenanceController::class, 'quickCreate']);
+
+    // Reporte EJECUTIVO por sitio (mantenimiento + eventos en un solo entregable)
+    Route::get('/reports/executive/sites',    [ExecutiveReportController::class, 'sites']);
+    Route::get('/reports/executive/options',  [ExecutiveReportController::class, 'options']);
+    Route::get('/reports/executive/preview',  [ExecutiveReportController::class, 'preview']);
+    Route::get('/reports/executive/pdf',      [ExecutiveReportController::class, 'pdf']);
+    Route::post('/reports/executive/templates', [ExecutiveReportController::class, 'storeTemplate']);
+    Route::delete('/reports/executive/templates/{template}', [ExecutiveReportController::class, 'destroyTemplate']);
 
     // Reporte GLOBAL de mantenimientos (uso interno) — rutas estáticas ANTES del wildcard {maintenance}
     Route::get('/maintenances/report',        [MaintenanceReportController::class, 'show']);
