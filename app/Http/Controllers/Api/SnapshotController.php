@@ -22,6 +22,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class SnapshotController extends Controller
 {
+    use \App\Console\Commands\Concerns\UsesPostgresBinaries;
+
     private function assertAllowed(Request $request): void
     {
         abort_unless($request->user()->can('snapshot.manage'), 403, 'No autorizado para esta acción.');
@@ -69,6 +71,9 @@ class SnapshotController extends Controller
                 'upload_max_filesize' => ini_get('upload_max_filesize'),
                 'post_max_size'       => ini_get('post_max_size'),
             ],
+            // Si el servidor no puede invocar pg_dump/psql, más vale decirlo ANTES de
+            // que alguien apriete el botón (Plesk: open_basedir / proc_open).
+            'tools'   => $this->pgToolsStatus(),
         ]);
     }
 
@@ -101,14 +106,21 @@ class SnapshotController extends Controller
 
         $before = collect(File::files($this->directory()))->map->getFilename()->all();
 
-        $status = Artisan::call('snapshot:export', array_filter([
-            '--no-media' => $request->boolean('no_media'),
-        ]));
+        try {
+            $status = Artisan::call('snapshot:export', array_filter([
+                '--no-media' => $request->boolean('no_media'),
+            ]));
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
 
         $output = Artisan::output();
 
         if ($status !== 0) {
-            return response()->json(['message' => 'No se pudo generar el respaldo.', 'output' => $output], 500);
+            return response()->json([
+                'message' => trim($output) ?: 'No se pudo generar el respaldo.',
+                'output'  => $output,
+            ], 500);
         }
 
         $file = collect(File::files($this->directory()))
