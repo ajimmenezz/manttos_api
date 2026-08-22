@@ -35,6 +35,9 @@ class EventController extends Controller
     use ScopesEvents;
     use MaintenanceActivityFilters;
 
+    /** Etiquetas de prioridad — mismas que muestra la pantalla (`PRIORITY_LABELS` del front). */
+    private const PRIORITY_LABELS = ['baja' => 'Baja', 'media' => 'Media', 'alta' => 'Alta', 'critica' => 'Crítica'];
+
     /**
      * Resuelve la fecha de ocurrencia respetando el flag global. Si la captura manual
      * está apagada (o no viene fecha), usa $fallback (now() al crear, o null al editar
@@ -482,36 +485,37 @@ class EventController extends Controller
      * pantalla). Cronológica, un renglón por evento, con los campos marcados para
      * bitácora resumidos en la última columna.
      */
+    /**
+     * GET /events/bitacora-pdf — la bitácora como DOCUMENTO.
+     *
+     * Antes salía como una tabla de seis columnas: cabía todo pero el detalle real
+     * —los campos del formulario de cada tipo de evento— terminaba apelmazado en una
+     * celda "Detalle". Ahora cada evento es una ficha con lo mismo que muestra la
+     * pantalla, apretada para no gastar hojas de más.
+     */
     public function bitacoraPdf(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         $payload = $this->bitacora($request)->getData(true);
         $defs    = $payload['field_defs'] ?? [];
 
-        $rows = array_map(function (array $e) use ($defs) {
-            $key    = ($e['event_type_id'] ?? '') . ':' . ($e['system_id'] ?? '');
-            $values = $e['field_values'] ?? [];
+        // Agrupado por día, que es como se lee una bitácora (y como la agrupa la pantalla).
+        $days = [];
 
-            $extra = [];
-            foreach ($defs[$key] ?? [] as $def) {
-                $v = $values[$def['field_key']] ?? null;
-                if (is_array($v)) $v = implode(', ', array_filter($v, 'is_scalar'));
-                if ($v === null || $v === '') continue;
-                $extra[] = $def['label'] . ': ' . $v;
-            }
+        foreach ($payload['events'] ?? [] as $e) {
+            $when = Carbon::parse($e['occurred_at'] ?? $e['created_at'] ?? now());
+            $key  = $when->toDateString();
 
-            $device = $e['device'] ?? null;
-
-            return [
-                substr((string) ($e['occurred_at'] ?? $e['created_at'] ?? ''), 0, 10),
-                (string) ($e['folio'] ?? ''),
-                (string) ($e['event_type']['label'] ?? ''),
-                (string) ($device['name'] ?? '—'),
-                (string) ($e['status']['label'] ?? ''),
-                trim((string) ($e['description'] ?? '') . ($extra ? "\n" . implode(' · ', $extra) : '')),
+            $days[$key] ??= [
+                'label'  => $when->locale('es')->isoFormat('dddd D [de] MMMM [de] YYYY'),
+                'events' => [],
             ];
-        }, $payload['events'] ?? []);
 
-        $binary = (new \App\Services\Pdf\DashboardPdf([
+            $days[$key]['events'][] = $this->bitacoraCard($e, $defs, $when);
+        }
+
+        ksort($days);
+
+        $binary = (new \App\Services\Pdf\EventLogPdf([
             'meta' => [
                 'title'        => 'Bitácora de eventos',
                 'client'       => $payload['site']['client'] ?? null,
@@ -519,21 +523,8 @@ class EventController extends Controller
                 'period_label' => $this->rangeLabel($payload['from'] ?? null, $payload['to'] ?? null),
                 'generated_at' => now()->toDateTimeString(),
             ],
-            'kpis'   => [['label' => 'Eventos en el periodo', 'value' => (string) ($payload['count'] ?? 0)]],
-            'blocks' => [[
-                'type'  => 'table',
-                'title' => 'Registro cronológico',
-                'cols'  => [
-                    ['label' => 'Fecha',       'w' => 20],
-                    ['label' => 'Folio',       'w' => 30],
-                    ['label' => 'Tipo',        'w' => 26],
-                    ['label' => 'Dispositivo', 'w' => 32],
-                    ['label' => 'Estado',      'w' => 24],
-                    ['label' => 'Detalle',     'w' => 58],
-                ],
-                'rows' => $rows,
-                'size' => 6.5,
-            ]],
+            'summary' => ['count' => (int) ($payload['count'] ?? 0)],
+            'days'    => array_values($days),
         ]))
             ->withSignature($request->input('signature'), $request->input('signature_align'))
             ->withBranding(\App\Support\Tenant::fromRequest($request))
@@ -542,6 +533,109 @@ class EventController extends Controller
         return response()->streamDownload(fn () => print($binary), 'bitacora-de-eventos.pdf', [
             'Content-Type' => 'application/pdf',
         ]);
+    }
+
+    /** Un evento, ya formateado para imprimir. */
+    private function bitacoraCard(array $e, array $defs, Carbon $when): array
+    {
+        $device = trim(implode(' · ', array_filter([
+            $e['device'] ?? null,
+            ! empty($e['did']) ? 'DID ' . $e['did'] : null,
+            $e['device_type'] ?? null,
+        ])));
+
+        $fields = [];
+        $key    = ($e['event_type_id'] ?? '') . ':' . ($e['system_id'] ?? '');
+
+        foreach ($defs[$key] ?? [] as $def) {
+            $fields[] = $this->bitacoraField($def, $e['field_values'][$def['field_key']] ?? null);
+        }
+
+        return [
+            'folio'        => $e['folio'] ?? '',
+            'type'         => $e['type'] ?? 'Evento',
+            'system'       => $e['system'] ?? null,
+            'status'       => $e['status'] ?? null,
+            'status_color' => $e['status_color'] ?? null,
+            'priority'     => self::PRIORITY_LABELS[$e['priority'] ?? ''] ?? ($e['priority'] ?? null),
+            'date'         => $when->format('d/m/Y'),
+            'time'         => $when->format('H:i'),
+            'device'       => $device !== '' ? $device : null,
+            'creator'      => $e['creator'] ?? null,
+            'assignee'     => $e['assignee'] ?? null,
+            'description'  => $e['description'] ?? null,
+            'fields'       => $fields,
+            'images'       => $this->bitacoraImages($e['images'] ?? []),
+        ];
+    }
+
+    /** Un campo del formulario, con el mismo formato que muestra la pantalla. */
+    private function bitacoraField(array $def, mixed $value): array
+    {
+        $type   = (string) ($def['field_type'] ?? 'text');
+        $config = is_array($def['config'] ?? null) ? $def['config'] : [];
+        $label  = (string) ($def['label'] ?? '');
+
+        if ($type === 'leyenda') {
+            $text = is_string($value) && $value !== '' ? $value : (string) ($def['legend_text'] ?? '');
+
+            return ['label' => $label, 'kind' => 'legend', 'value' => $text];
+        }
+
+        if ($type === 'image') {
+            return ['label' => $label, 'kind' => 'images', 'images' => $this->bitacoraImages($value)];
+        }
+
+        return ['label' => $label, 'kind' => 'text', 'value' => $this->bitacoraValue($value, $type, $config)];
+    }
+
+    /**
+     * Espejo de `formatFieldValue` del front: lo impreso debe decir lo mismo que la
+     * pantalla. Si allá cambia el formato de un tipo, aquí también.
+     */
+    private function bitacoraValue(mixed $v, string $type, array $config): string
+    {
+        if ($v === null || $v === '' || $v === []) return '';
+
+        return match ($type) {
+            'boolean'  => $v ? 'Sí' : 'No',
+            'signature' => $v ? 'Firma capturada' : '',
+            'date'     => is_string($v) ? Carbon::parse($v)->locale('es')->isoFormat('DD [de] MMM [de] YYYY') : (string) $v,
+            'datetime' => is_string($v) ? Carbon::parse($v)->locale('es')->isoFormat('DD MMM YYYY, HH:mm') : (string) $v,
+            'currency' => '$' . number_format((float) $v, 2) . ' ' . ($config['currency'] ?? 'MXN'),
+            'number'   => trim((string) $v . ' ' . ($config['unit'] ?? '')),
+            // Listas personalizadas: se guarda el valor y se muestra la etiqueta.
+            'custom_list' => $this->bitacoraOptionLabel($config, $v),
+            'custom_multiselect' => implode(', ', array_map(
+                fn ($x) => $this->bitacoraOptionLabel($config, $x),
+                is_array($v) ? $v : [$v],
+            )),
+            'multiselect' => is_array($v) ? implode(', ', array_map('strval', $v)) : (string) $v,
+            default    => is_array($v) ? implode(', ', array_filter($v, 'is_scalar')) : (string) $v,
+        };
+    }
+
+    private function bitacoraOptionLabel(array $config, mixed $value): string
+    {
+        foreach ($config['options'] ?? [] as $opt) {
+            if (($opt['value'] ?? null) == $value) return (string) ($opt['label'] ?? $value);
+        }
+
+        return (string) $value;
+    }
+
+    /**
+     * URLs → rutas en disco. FPDF no descarga nada: si no está el archivo, la foto
+     * simplemente no sale.
+     */
+    private function bitacoraImages(mixed $value): array
+    {
+        $urls = is_array($value) ? $value : (is_string($value) && $value !== '' ? [$value] : []);
+
+        return array_values(array_filter(array_map(
+            fn ($u) => is_string($u) ? \App\Support\MediaFile::thumbnail(\App\Support\MediaFile::path($u)) : null,
+            $urls,
+        )));
     }
 
     private function rangeLabel(?string $from, ?string $to): string

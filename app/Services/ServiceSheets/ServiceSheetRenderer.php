@@ -6,7 +6,6 @@ use App\Models\Event;
 use App\Models\EventComment;
 use App\Models\EventTypeField;
 use App\Models\SystemField;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Hoja de servicio de un evento: reúne los datos (generales, dispositivo + directorio,
@@ -240,33 +239,10 @@ class ServiceSheetRenderer
      */
     private function dataUri(string $url): ?string
     {
-        if (str_starts_with($url, 'data:')) {
-            return $url;
-        }
-        try {
-            $disk = Storage::disk('public');
-            $path = (string) parse_url($url, PHP_URL_PATH);
-            $base = basename($path);
-
-            // Ruta relativa al disco público: lo que sigue a "/storage/".
-            $candidates = [];
-            if (($pos = strpos($path, '/storage/')) !== false) {
-                $candidates[] = ltrim(substr($path, $pos + strlen('/storage/')), '/');
-            }
-            $candidates[] = "maintenance-media/{$base}";
-            $candidates[] = $base;
-
-            foreach (array_unique(array_filter($candidates)) as $rel) {
-                if ($disk->exists($rel)) {
-                    $bytes = $disk->get($rel);
-                    $mime  = $disk->mimeType($rel) ?: 'image/jpeg';
-                    return 'data:' . $mime . ';base64,' . base64_encode($bytes);
-                }
-            }
-        } catch (\Throwable) {
-            // ignora imágenes ilegibles
-        }
-        return null;
+        // La resolución vive en App\Support\MediaFile: la comparten la hoja de servicio y
+        // la bitácora de eventos, y tenerla duplicada llevaba a que una arreglara rutas
+        // que la otra seguía sin encontrar.
+        return \App\Support\MediaFile::dataUri($url);
     }
 
     /** Vuelve legibles las @menciones del cuerpo (formato canónico `@[Nombre](id)`). */

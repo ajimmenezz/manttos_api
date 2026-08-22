@@ -587,7 +587,7 @@ abstract class Pdf extends FPDF
             $this->SetFont('Arial', 'B', 8);
             $lines = 1;
             foreach ($chunk as $cell) {
-                $lines = max($lines, count($this->wrap((string) ($cell['value'] ?? '-'), $colW - 4)));
+                $lines = max($lines, count($this->wrap((string) ($cell['value'] ?? '-'), $this->textWidth($colW - 4))));
             }
             $rowH = 5 + $lines * 4;
             $this->ensureSpace($rowH + 2);
@@ -663,7 +663,7 @@ abstract class Pdf extends FPDF
             $this->SetFont('Arial', '', $size);
             $lines = 1;
             foreach ($cols as $i => $c) {
-                $lines = max($lines, count($this->wrap((string) ($row[$i] ?? ''), $c['w'] - 3)));
+                $lines = max($lines, count($this->wrap((string) ($row[$i] ?? ''), $this->textWidth($c['w'] - 3))));
             }
             $rowH = max(5.5, $lines * 4 + 1.5);
 
@@ -692,6 +692,18 @@ abstract class Pdf extends FPDF
     }
 
     /** Parte un texto en líneas que caben en `$w` con la fuente activa. */
+    /**
+     * Ancho REAL de texto dentro de un MultiCell de ancho $w.
+     *
+     * FPDF le descuenta su propio margen de celda a cada lado, así que medir con $w a
+     * secas cuenta de menos: el alto de fila salía para 2 renglones y MultiCell pintaba
+     * 3, que se desbordaban sobre la fila siguiente.
+     */
+    protected function textWidth(float $w): float
+    {
+        return $w - 2 * $this->cMargin;
+    }
+
     protected function wrap(string $text, float $w): array
     {
         $out = [];
