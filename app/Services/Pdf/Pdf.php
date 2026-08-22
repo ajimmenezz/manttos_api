@@ -3,7 +3,7 @@
 namespace App\Services\Pdf;
 
 use App\Support\Branding;
-use Carbon\Carbon;
+use App\Support\PdfFooter;
 use FPDF;
 
 /**
@@ -31,20 +31,17 @@ abstract class Pdf extends FPDF
     protected const PANEL_H = 48;         // alto de un panel de barras
     protected const TIME_H  = 36;         // alto del panel de serie por fecha
     protected const KPI_H   = 24;
-    protected const BOTTOM  = 283;        // último milímetro utilizable (arriba del pie)
 
-    /** Distancia del borde inferior a la línea de firma que va en CADA hoja. */
-    protected const SIGN_UP = 22;
+    /** Alto de una línea del pie y aire por debajo de la última. */
+    protected const FOOT_LINE   = 3.6;
+    protected const FOOT_BOTTOM = 5;
+    protected const FOOT_SIZE   = 7.5;
 
-    /**
-     * Franja que el contenido le cede a esa firma.
-     *
-     * Sin esto, el contenido llegaba hasta BOTTOM (283) y la firma se dibujaba en 275:
-     * compartían los mismos milímetros y la línea quedaba pegada —o encima— del último
-     * panel. La reserva empuja ese panel a la hoja siguiente, que es justo lo que hace
-     * falta para poder firmar.
-     */
-    protected const SIGN_RESERVE = 16;
+    /** Aire entre el contenido y el pie. */
+    protected const FOOT_GAP = 3;
+
+    /** Lo que ocupa la firma que va en CADA hoja, justo encima del pie. */
+    protected const SIGN_BLOCK = 15;
 
     protected const NAVY   = [30, 58, 95];
     protected const INK    = [51, 65, 85];
@@ -76,6 +73,9 @@ abstract class Pdf extends FPDF
     /** Tono de TRAZO: títulos, barras y filetes. Ver `withBranding()`. */
     protected array $brandInk     = self::NAVY;
     protected array $brandPrimary = [37, 99, 235];
+
+    /** Pie configurable del tenant; se resuelve junto con la marca. */
+    protected ?PdfFooter $footer = null;
 
     /**
      * Cierre de conformidad: 'end' = una línea al final del documento, 'page' = una
@@ -134,6 +134,7 @@ abstract class Pdf extends FPDF
     {
         $brand = Branding::for($tenant);
 
+        $this->footer       = PdfFooter::for($tenant);
         $this->logo         = $brand->logo;
         $this->brandDark    = $brand->dark;
         $this->brandDarkTo  = $brand->darkTo;
@@ -148,6 +149,9 @@ abstract class Pdf extends FPDF
             (int) round(($brand->dark[2] + $brand->darkTo[2]) / 2),
         ];
         $this->brandPrimary = $brand->primary;
+
+        // La ficha {app} del pie sale de aquí; el resto de las fichas ya viven en `meta`.
+        $this->data['meta']['app_name'] ??= $brand->appName;
 
         return $this;
     }
@@ -310,10 +314,14 @@ abstract class Pdf extends FPDF
 
     public function Footer(): void
     {
+        $footerH = $this->footerHeight();
+
         if ($this->signature === 'page') {
             $w = 90;
             $x = $this->signatureX($w);
-            $y = $this->h - self::SIGN_UP;
+            // Encima del pie, no a una distancia fija del borde: si el pie crece, la firma
+            // sube con él en lugar de quedar debajo.
+            $y = $this->h - $footerH - 9;
 
             $this->draw(self::INK);
             $this->SetLineWidth(0.3);
@@ -326,16 +334,21 @@ abstract class Pdf extends FPDF
             $this->Cell($w, 4, $this->t('Nombre y Firma de Conformidad'), 0, 0, $this->signatureAlign === 'center' ? 'C' : strtoupper($this->signatureAlign[0]));
         }
 
-        $this->SetY(-12);
-        $this->SetFont('Arial', '', 7.5);
+        $columns = ($this->footer ?? PdfFooter::default())
+            ->resolve($this->data['meta'] ?? [], $this->PageNo());
+
+        $colW = self::CONTENT_W / max(1, count($columns));
+        $top  = $this->h - $footerH;
+
+        $this->SetFont('Arial', '', self::FOOT_SIZE);
         $this->ink(self::MUTED);
-        $this->Cell(
-            self::CONTENT_W / 2,
-            5,
-            $this->t('Generado el ' . Carbon::parse($this->str('generated_at'))->locale('es')->isoFormat('D [de] MMMM YYYY, HH:mm')),
-            0, 0, 'L'
-        );
-        $this->Cell(self::CONTENT_W / 2, 5, $this->t('Página ') . $this->PageNo() . '/{nb}', 0, 0, 'R');
+
+        foreach ($columns as $i => $col) {
+            foreach ($col['lines'] as $j => $line) {
+                $this->SetXY(self::MARGIN + $i * $colW, $top + $j * self::FOOT_LINE);
+                $this->Cell($colW, self::FOOT_LINE, $this->fit($line, $colW), 0, 0, $col['align']);
+            }
+        }
     }
 
     /** Salta de página si el bloque que sigue no cabe completo. */
@@ -354,7 +367,13 @@ abstract class Pdf extends FPDF
      */
     protected function bottomLimit(): float
     {
-        return self::BOTTOM - ($this->signature === 'page' ? self::SIGN_RESERVE : 0) - $this->tailReserve;
+        // Ya no es una constante: un pie de cuatro líneas se come cuatro veces más hoja,
+        // así que el corte de página se deriva de lo que el pie ocupa DE VERDAD.
+        return $this->h
+            - $this->footerHeight()
+            - self::FOOT_GAP
+            - ($this->signature === 'page' ? self::SIGN_BLOCK : 0)
+            - $this->tailReserve;
     }
 
     /** Título de banda: la separación entre secciones del tablero. */
@@ -810,6 +829,14 @@ abstract class Pdf extends FPDF
         if (str_starts_with($img, 'data:image/jpeg') || str_starts_with($img, 'data:image/jpg')) return 'JPEG';
 
         return strtoupper(pathinfo(parse_url($img, PHP_URL_PATH) ?: $img, PATHINFO_EXTENSION)) === 'PNG' ? 'PNG' : 'JPEG';
+    }
+
+    /** Milímetros que ocupa el pie completo, incluido el aire de abajo. */
+    protected function footerHeight(): float
+    {
+        $lines = ($this->footer ?? PdfFooter::default())->lineCount();
+
+        return $lines * self::FOOT_LINE + self::FOOT_BOTTOM;
     }
 
     /**

@@ -44,13 +44,16 @@ class AppSettingController extends Controller
         return response()->json($list->values());
     }
 
-    /** Decodifica el campo `theme` (JSON string) a objeto para la respuesta. */
+    /** Decodifica los campos JSON (`theme`, `pdf_footer`) a objeto para la respuesta. */
     private function decodeTheme(array $map): array
     {
-        if (isset($map['theme']) && is_string($map['theme'])) {
-            $decoded = json_decode($map['theme'], true);
-            $map['theme'] = json_last_error() === JSON_ERROR_NONE ? $decoded : null;
+        foreach (['theme', 'pdf_footer'] as $key) {
+            if (! isset($map[$key]) || ! is_string($map[$key])) continue;
+
+            $decoded = json_decode($map[$key], true);
+            $map[$key] = json_last_error() === JSON_ERROR_NONE ? $decoded : null;
         }
+
         return $map;
     }
 
@@ -98,6 +101,11 @@ class AppSettingController extends Controller
             'login_bg_url'    => 'sometimes|nullable|string|max:500',
             'color_preset'    => 'sometimes|string|in:blue,indigo,violet,green,orange,rose',
             'theme'           => 'sometimes|nullable|array',
+            // Pie configurable de los imprimibles: {columns: [{text, align}]}. Ver App\Support\PdfFooter.
+            'pdf_footer'      => 'sometimes|nullable|array',
+            'pdf_footer.columns'        => 'sometimes|array|max:3',
+            'pdf_footer.columns.*.text' => 'nullable|string|max:600',
+            'pdf_footer.columns.*.align' => 'nullable|in:L,C,R',
             'allow_execution_date' => 'sometimes|boolean',
             'smtp_host'       => 'sometimes|nullable|string|max:255',
             'smtp_port'       => 'sometimes|nullable|integer|min:1|max:65535',
@@ -111,7 +119,7 @@ class AppSettingController extends Controller
 
         // El branding y el tema son por dominio; el SMTP es global (tenant default).
         $tenant      = $this->resolveTenant($request);
-        $perTenant   = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme'];
+        $perTenant   = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme', 'pdf_footer'];
 
         foreach ($data as $key => $value) {
             // No sobreescribir la contraseña si viene el placeholder
@@ -120,7 +128,7 @@ class AppSettingController extends Controller
             }
 
             $stored = match (true) {
-                $key === 'theme'                => ($value !== null ? json_encode($value) : null),
+                $key === 'theme', $key === 'pdf_footer' => ($value !== null ? json_encode($value) : null),
                 $key === 'allow_execution_date' => ($value ? '1' : '0'),
                 default                         => ($value !== null ? (string) $value : null),
             };
