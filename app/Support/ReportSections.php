@@ -26,7 +26,7 @@ use Illuminate\Support\Collection;
  */
 class ReportSections
 {
-    public const REPORTS = ['events', 'maintenances'];
+    public const REPORTS = ['events', 'maintenances', 'personnel'];
 
     /**
      * Catálogo por reporte. Cada sección: key, group, label y `payload` = llaves de la
@@ -68,6 +68,32 @@ class ReportSections
                     ['key' => 'detail',      'group' => 'Tablas', 'label' => 'Detalle de eventos (tabla y descarga a Excel)'],
 
                     ['key' => 'plan_view',   'group' => 'Vistas', 'label' => 'Vista de plano (dispositivos con eventos)'],
+
+                    ['key' => 'filters_applied', 'group' => 'Documento', 'label' => 'Resumen de filtros aplicados (sólo impreso)', 'pdf' => true],
+                ],
+            ],
+            'personnel' => [
+                'label'    => 'Análisis de personal',
+                'route'    => '/reports/personal',
+                'sections' => [
+                    ['key' => 'kpi.people',     'group' => 'Indicadores', 'label' => 'Personas con actividad', 'pdf' => true],
+                    ['key' => 'kpi.records',    'group' => 'Indicadores', 'label' => 'Registros en el periodo', 'pdf' => true],
+                    ['key' => 'kpi.activities', 'group' => 'Indicadores', 'label' => 'Capturas de actividad',   'pdf' => true],
+                    ['key' => 'kpi.events',     'group' => 'Indicadores', 'label' => 'Eventos creados',         'pdf' => true],
+
+                    ['key' => 'weekly',     'group' => 'Gráficas', 'label' => 'Registros por semana',   'payload' => ['weekly'],     'pdf' => true],
+                    ['key' => 'by_hour',    'group' => 'Gráficas', 'label' => 'Horarios de trabajo',    'payload' => ['by_hour'],    'pdf' => true],
+                    ['key' => 'by_weekday', 'group' => 'Gráficas', 'label' => 'Por día de la semana',   'payload' => ['by_weekday'], 'pdf' => true],
+
+                    ['key' => 'by_activity_type', 'group' => 'Qué hace', 'label' => 'Qué actividades registra',        'payload' => ['by_activity_type'], 'pdf' => true],
+                    ['key' => 'by_event_type',    'group' => 'Qué hace', 'label' => 'Qué eventos levanta',             'payload' => ['by_event_type'],    'pdf' => true],
+                    ['key' => 'by_module',        'group' => 'Qué hace', 'label' => 'En qué parte del sistema trabaja', 'payload' => ['by_module'],        'pdf' => true],
+                    ['key' => 'by_action',        'group' => 'Qué hace', 'label' => 'Qué tipo de acciones hace',       'payload' => ['by_action'],        'pdf' => true],
+
+                    ['key' => 'by_client', 'group' => 'Dónde', 'label' => 'Para qué clientes', 'payload' => ['by_client'], 'pdf' => true],
+                    ['key' => 'by_site',   'group' => 'Dónde', 'label' => 'En qué sitios',     'payload' => ['by_site'],   'pdf' => true],
+
+                    ['key' => 'by_person', 'group' => 'Tablas', 'label' => 'Detalle por persona', 'payload' => ['by_person'], 'pdf' => true],
 
                     ['key' => 'filters_applied', 'group' => 'Documento', 'label' => 'Resumen de filtros aplicados (sólo impreso)', 'pdf' => true],
                 ],

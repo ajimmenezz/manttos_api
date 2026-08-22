@@ -21,6 +21,7 @@ class ReportExportTemplateController extends Controller
     private const PERMISSION = [
         'events'       => 'events.view',
         'maintenances' => 'maintenances.report',
+        'personnel'    => 'reports.personnel',
     ];
 
     private function assertReport(Request $request, string $report): void

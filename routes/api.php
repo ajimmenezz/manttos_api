@@ -59,6 +59,7 @@ use App\Http\Controllers\Api\FloorPlanController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\WorkCalendarController;
 use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\PersonnelReportController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ReportExportTemplateController;
 use App\Http\Controllers\Api\ReportSectionController;
@@ -619,6 +620,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/executive/options',  [ExecutiveReportController::class, 'options']);
     Route::get('/reports/executive/preview',  [ExecutiveReportController::class, 'preview']);
     Route::get('/reports/executive/pdf',      [ExecutiveReportController::class, 'pdf']);
+    // Análisis de personal (reporte interno de gestión, permiso propio).
+    Route::get('/reports/personnel',     [PersonnelReportController::class, 'show']);
+    Route::get('/reports/personnel/pdf', [PersonnelReportController::class, 'pdf']);
+
     // Plantillas de exportación de los reportes-tablero (por usuario: qué bloques y
     // qué firma). El permiso lo pone el reporte al que pertenecen.
     Route::get('/report-templates',                 [ReportExportTemplateController::class, 'index']);

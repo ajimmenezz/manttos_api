@@ -152,6 +152,7 @@ class PermissionSeeder extends Seeder
         'snapshot.manage',              // exportar/importar TODA la instalación (superadmin; puede reemplazar la base)
         'report-sections.manage',       // qué secciones de los reportes-tablero ve cada rol/usuario
         'reports.executive',            // generar el reporte ejecutivo por sitio (PDF para el cliente)
+'reports.personnel',            // análisis de personal: qué hace cada usuario y cuándo (reporte interno)
 
         // ── Documentación ───────────────────────────────────────────
         'manuals.view',                 // guías completas web/móvil

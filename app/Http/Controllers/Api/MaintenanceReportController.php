@@ -111,7 +111,12 @@ class MaintenanceReportController extends Controller
         $byHour = collect(range(0, 23))->map(fn ($h) => [
             'hour'  => $h,
             'label' => sprintf('%02d:00', $h),
-            'count' => $activities->filter(fn ($a) => (int) Carbon::parse($a->performed_at)->format('G') === $h)->count(),
+            // La hora sale de `created_at`, NO de `performed_at`: éste es la FECHA de
+            // trabajo y en la mayoría de las capturas viene a las 00:00, así que la
+            // gráfica reportaba casi todo a medianoche. Y se convierte a la zona de
+            // trabajo, porque la base guarda en UTC y salían corridas 6 horas.
+            'count' => $activities->filter(fn ($a) => (int) Carbon::parse($a->created_at)
+                ->setTimezone(\App\Support\WorkCalendar::TZ)->hour === $h)->count(),
         ])->values();
 
         $payload = [

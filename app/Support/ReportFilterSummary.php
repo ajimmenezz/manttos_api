@@ -29,10 +29,11 @@ class ReportFilterSummary
 
         if ($period = self::period($request)) $rows[] = ['Periodo', $period];
 
-        $rows = array_merge($rows, self::common($request, $filters));
-        $rows = array_merge($rows, $report === 'events'
-            ? self::events($request, $filters)
-            : self::maintenances($request, $filters));
+        $rows = array_merge($rows, match ($report) {
+            'personnel'  => self::personnel($request, $filters),
+            'events'     => array_merge(self::common($request, $filters), self::events($request, $filters)),
+            default      => array_merge(self::common($request, $filters), self::maintenances($request, $filters)),
+        });
 
         // Campos dinámicos: del formulario y del directorio.
         $rows = array_merge($rows, self::dynamic($request->input('field_filters'), $filters['fields'] ?? []));
@@ -61,6 +62,32 @@ class ReportFilterSummary
             self::pick($request, 'site_id',   'Sitio',   $filters['sites'] ?? [],   'name'),
             self::pick($request, 'system_id', 'Sistema', $filters['systems'] ?? [], 'label'),
         ]));
+    }
+
+    /**
+     * Análisis de personal: no lleva cliente ni sitio —es un reporte interno de gestión—,
+     * pero sí a quiénes se está mirando, que es lo que da sentido a las cifras.
+     */
+    private static function personnel(Request $request, array $filters): array
+    {
+        $rows = [];
+        $ids  = array_filter(array_map('trim', explode(',', (string) $request->input('user_ids'))));
+
+        if ($ids) {
+            $names = collect($filters['users'] ?? [])
+                ->whereIn('id', array_map('intval', $ids))
+                ->pluck('name')
+                ->all();
+
+            $rows[] = ['Personas', $names ? implode(', ', $names) : implode(', ', $ids)];
+        }
+
+        if ($role = $request->input('role')) $rows[] = ['Rol', (string) $role];
+
+        // Sin filtro no es "ninguno": es todo el personal, y conviene decirlo.
+        if (! $ids && ! $role) $rows[] = ['Personas', 'Todo el personal'];
+
+        return $rows;
     }
 
     private static function events(Request $request, array $filters): array
