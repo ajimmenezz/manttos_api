@@ -31,8 +31,11 @@ class DashboardPdf extends Pdf
         // el resto ocupa el ancho completo.
         $blocks  = array_values($this->data['blocks'] ?? []);
         $pending = null;
+        $last    = count($blocks) - 1;
 
-        foreach ($blocks as $block) {
+        foreach ($blocks as $i => $block) {
+            if ($i === $last) $this->reserveTailForSignature();
+
             $isHalf = ($block['type'] ?? '') === 'bars' && ($block['half'] ?? true);
 
             if ($isHalf) {
@@ -53,7 +56,10 @@ class DashboardPdf extends Pdf
             };
         }
 
-        if ($pending !== null) $this->barsRow($pending, null);
+        if ($pending !== null) {
+            $this->reserveTailForSignature();   // el último bloque era media barra pendiente
+            $this->barsRow($pending, null);
+        }
 
         if ($this->signature === 'end') $this->signatureBlock();
 

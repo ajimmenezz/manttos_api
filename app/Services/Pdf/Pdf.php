@@ -86,6 +86,17 @@ abstract class Pdf extends FPDF
     /** Dónde se coloca esa línea a lo ancho: 'left' | 'center' | 'right'. */
     protected string $signatureAlign = 'center';
 
+    /**
+     * Milímetros que el ÚLTIMO bloque le cede a la firma final.
+     *
+     * Con firma al final, si el último bloque llegaba hasta abajo la firma se iba sola a
+     * una hoja nueva —una página entera con una raya—. Reservando al llegar al último
+     * bloque, ese bloque corta antes y la firma cierra el documento donde debe.
+     * Sólo se activa en el tramo final: reservarlo en todas las hojas desperdiciaría
+     * espacio en un documento largo.
+     */
+    protected float $tailReserve = 0;
+
     public function __construct(array $data)
     {
         parent::__construct('P', 'mm', 'A4');
@@ -343,7 +354,7 @@ abstract class Pdf extends FPDF
      */
     protected function bottomLimit(): float
     {
-        return self::BOTTOM - ($this->signature === 'page' ? self::SIGN_RESERVE : 0);
+        return self::BOTTOM - ($this->signature === 'page' ? self::SIGN_RESERVE : 0) - $this->tailReserve;
     }
 
     /** Título de banda: la separación entre secciones del tablero. */
@@ -761,12 +772,23 @@ abstract class Pdf extends FPDF
     }
 
     /**
+     * Lo llama cada imprimible justo antes de componer su ÚLTIMO bloque, para que la
+     * firma final no acabe sola en una hoja. No hace nada si no hay firma al final.
+     */
+    protected function reserveTailForSignature(): void
+    {
+        if ($this->signature === 'end') $this->tailReserve = 30;
+    }
+
+    /**
      * Cierre de conformidad: una sola línea para nombre y firma, al final del
      * documento. Se llama al terminar de componer, nunca por página, para que no
      * queden firmas sueltas a media hoja.
      */
     protected function signatureBlock(string $caption = 'Nombre y Firma de Conformidad'): void
     {
+        // La reserva era para esto: se libera antes de pedir el sitio.
+        $this->tailReserve = 0;
         $this->ensureSpace(34);
 
         $w  = 110;

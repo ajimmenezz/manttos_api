@@ -205,6 +205,25 @@ class MaintenanceReportController extends Controller
         $to   = $request->input('date_to');
         $fmt  = fn ($d) => $d ? Carbon::parse($d)->format('d/m/Y') : '…';
 
+        // Al final, qué recorte de datos representa el documento: un PDF archivado no
+        // dice por sí solo si esas cifras eran de un sitio, de un cliente o de todo.
+        if ($shows('filters_applied')) {
+            $applied = \App\Support\ReportFilterSummary::rows($request, $payload, 'maintenances');
+
+            if ($applied) {
+                $blocks[] = [
+                    'type'  => 'table',
+                    'title' => 'Filtros aplicados',
+                    'cols'  => [
+                        ['label' => 'Filtro', 'w' => 62],
+                        ['label' => 'Valor',  'w' => 128],
+                    ],
+                    'rows'  => $applied,
+                    'size'  => 7,
+                ];
+            }
+        }
+
         $binary = (new \App\Services\Pdf\DashboardPdf([
             'meta' => [
                 'title'        => 'Reporte de mantenimientos',

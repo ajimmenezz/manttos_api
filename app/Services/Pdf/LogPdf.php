@@ -44,10 +44,14 @@ class LogPdf extends Pdf
         $count = (int) ($this->data['summary']['count'] ?? 0);
         $this->intro($count);
 
+        $total = array_sum(array_map(fn ($d) => count($d['entries'] ?? []), $this->data['days'] ?? []));
+        $n     = 0;
+
         foreach ($this->data['days'] ?? [] as $day) {
             $this->dayHeader((string) ($day['label'] ?? ''));
 
             foreach ($day['entries'] ?? [] as $entry) {
+                if (++$n === $total) $this->reserveTailForSignature();
                 $this->entry($entry);
             }
         }

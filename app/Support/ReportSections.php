@@ -68,6 +68,8 @@ class ReportSections
                     ['key' => 'detail',      'group' => 'Tablas', 'label' => 'Detalle de eventos (tabla y descarga a Excel)'],
 
                     ['key' => 'plan_view',   'group' => 'Vistas', 'label' => 'Vista de plano (dispositivos con eventos)'],
+
+                    ['key' => 'filters_applied', 'group' => 'Documento', 'label' => 'Resumen de filtros aplicados (sólo impreso)', 'pdf' => true],
                 ],
             ],
             'maintenances' => [
@@ -92,6 +94,8 @@ class ReportSections
                     ['key' => 'rank_client',   'group' => 'Tablas', 'label' => 'Ranking por cliente',   'payload' => ['by_client'], 'pdf' => true],
                     ['key' => 'rank_site',     'group' => 'Tablas', 'label' => 'Ranking por sitio',     'payload' => ['by_site'], 'pdf' => true],
                     ['key' => 'detail',        'group' => 'Tablas', 'label' => 'Detalle de capturas (tabla y descarga a Excel)'],
+
+                    ['key' => 'filters_applied', 'group' => 'Documento', 'label' => 'Resumen de filtros aplicados (sólo impreso)', 'pdf' => true],
                 ],
             ],
         ];

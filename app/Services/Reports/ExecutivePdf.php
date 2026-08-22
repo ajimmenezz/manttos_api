@@ -24,7 +24,14 @@ class ExecutivePdf extends Pdf
             $this->renderSummary($summary);
         }
 
-        foreach (array_values($this->data['sections'] ?? []) as $i => $section) {
+        $sections = array_values($this->data['sections'] ?? []);
+        $last     = count($sections) - 1;
+
+        foreach ($sections as $i => $section) {
+            // La última sección le cede sitio a la firma: si no, cerraba la hoja y la
+            // firma se iba sola a una página nueva.
+            if ($i === $last) $this->reserveTailForSignature();
+
             $this->renderSection($section, self::SERIES[$i % count(self::SERIES)]);
         }
 

@@ -349,6 +349,25 @@ class EventDashboardController extends Controller
         // llevarse los registros uno por uno está la descarga a Excel, y para leerlos con
         // su detalle real, la bitácora. El imprimible se queda con indicadores y gráficas.
 
+        // Al final, qué recorte de datos representa el documento: un PDF archivado no
+        // dice por sí solo si esas cifras eran de un sitio, de un cliente o de todo.
+        if ($shows('filters_applied')) {
+            $applied = \App\Support\ReportFilterSummary::rows($request, $payload, 'events');
+
+            if ($applied) {
+                $blocks[] = [
+                    'type'  => 'table',
+                    'title' => 'Filtros aplicados',
+                    'cols'  => [
+                        ['label' => 'Filtro', 'w' => 62],
+                        ['label' => 'Valor',  'w' => 128],
+                    ],
+                    'rows'  => $applied,
+                    'size'  => 7,
+                ];
+            }
+        }
+
         $binary = (new \App\Services\Pdf\DashboardPdf([
             'meta' => [
                 'title'        => 'Reporte de eventos',
