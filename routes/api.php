@@ -101,6 +101,14 @@ Route::get('/snapshots/{name}/file', [SnapshotController::class, 'file'])
     ->middleware('signed')
     ->name('snapshots.file');
 
+// Avance de la importación, también con firma y también fuera de auth:sanctum: a
+// media importación el esquema está borrado y el saneo vacía los tokens, así que un
+// endpoint autenticado devolvería 401/500 justo cuando la pantalla necesita saber
+// cómo va. La firma la emite el propio import a quien ya probó tener el permiso.
+Route::get('/snapshots/import-progress', [SnapshotController::class, 'importProgress'])
+    ->middleware('signed')
+    ->name('snapshots.import-progress');
+
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
 

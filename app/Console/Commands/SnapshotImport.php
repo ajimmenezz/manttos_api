@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Console\Commands\Concerns\UsesPostgresBinaries;
+use App\Support\SnapshotProgress;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -33,9 +34,13 @@ class SnapshotImport extends Command
         {--force : No preguntar}
         {--keep-secrets : No sanear (usar al mudar la instalación a otro servidor productivo)}
         {--password= : Contraseña que queda en todos los usuarios al sanear}
-        {--no-media : No restaurar imágenes ni archivos}';
+        {--no-media : No restaurar imágenes ni archivos}
+        {--progress-file= : Archivo JSON donde reportar el avance (lo usa la pantalla)}';
 
     protected $description = 'Restaura un snapshot completo (base de datos + archivos) generado con snapshot:export';
+
+    /** Sólo cuando lo dispara la pantalla; por consola el avance ya se ve en vivo. */
+    private ?SnapshotProgress $progress = null;
 
     public function handle(): int
     {
@@ -56,6 +61,11 @@ class SnapshotImport extends Command
             $conn     = $this->pgConnection($this->option('database') ?: null);
             $sanitize = ! $this->option('keep-secrets') && ! app()->environment('production');
 
+            if ($file = $this->option('progress-file')) {
+                $this->progress = SnapshotProgress::make($file);
+                $this->progress->start($zipPath, $conn['database']);
+            }
+
             $this->summary($manifest, $conn, $sanitize);
 
             if (! $this->option('force') && ! $this->confirm("Se REEMPLAZA el contenido de «{$conn['database']}». ¿Continuar?", false)) {
@@ -66,10 +76,11 @@ class SnapshotImport extends Command
             }
 
             File::ensureDirectoryExists($temp);
-            $zip->extractTo($temp);
+            $this->extract($zip, $temp);
             $zip->close();
 
             $this->info('Restaurando la base de datos…');
+            $this->progress?->phase('base');
             $this->restoreDatabase($conn, $temp . '/database.sql');
 
             if (! $this->option('no-media') && is_dir($temp . '/media')) {
@@ -86,16 +97,19 @@ class SnapshotImport extends Command
 
             // La verificación va ANTES del saneo: el saneo vacía tokens a propósito y
             // enturbiaría la comparación.
+            $this->progress?->phase('verificar');
             $ok = $this->verify($manifest);
 
             if ($sanitize) {
                 $this->info('Saneando el clon…');
+                $this->progress?->phase('sanear');
                 $this->sanitize();
                 $this->rewriteUrls($manifest['app_url'] ?? null);
             } else {
                 $this->warn('Sin sanear: este clon conserva SMTP, webhooks, integraciones y tokens del origen.');
             }
 
+            $this->progress?->phase('cerrar');
             $this->call('optimize:clear');
             $this->call('permission:cache-reset');
             // En Windows el enlace es una unión: is_link() no la reconoce y storage:link
@@ -109,6 +123,10 @@ class SnapshotImport extends Command
             $this->newLine();
             $ok ? $this->info('Snapshot restaurado y verificado.')
                 : $this->warn('Snapshot restaurado CON DIFERENCIAS (ver arriba).');
+
+            $this->progress?->finish($ok
+                ? 'Restaurado y verificado.'
+                : 'Restaurado, pero los conteos no cuadran con el manifiesto (revisa la salida).');
             if ($sanitize) {
                 $this->line('  Todos los usuarios quedaron con la contraseña: ' . $this->password());
             }
@@ -116,8 +134,16 @@ class SnapshotImport extends Command
             return self::SUCCESS;
         } catch (RuntimeException $e) {
             $this->error($e->getMessage());
+            $this->progress?->fail($e->getMessage());
 
             return self::FAILURE;
+        } catch (\Throwable $e) {
+            // Cualquier otro fallo (disco lleno, ZIP corrupto) también tiene que llegar
+            // a la pantalla: quedarse en «procesando» para siempre es peor que el error.
+            $this->error($e->getMessage());
+            $this->progress?->fail($e->getMessage());
+
+            throw $e;
         }
     }
 
@@ -188,22 +214,65 @@ class SnapshotImport extends Command
         }
     }
 
+    /**
+     * Extrae el ZIP reportando avance.
+     *
+     * `extractTo()` de golpe sería una sola llamada opaca de varios minutos con medio
+     * giga de fotos: la pantalla no tendría nada que mostrar. Se extrae por lotes para
+     * poder contar entradas sin pagar una llamada por archivo.
+     */
+    private function extract(ZipArchive $zip, string $temp): void
+    {
+        $total = $zip->numFiles;
+        $this->progress?->phase('extraer', $total);
+
+        if (! $this->progress) {
+            $zip->extractTo($temp);
+
+            return;
+        }
+
+        $names = [];
+        for ($i = 0; $i < $total; $i++) {
+            $names[] = $zip->getNameIndex($i);
+        }
+
+        $done = 0;
+        foreach (array_chunk($names, 40) as $chunk) {
+            $zip->extractTo($temp, $chunk);
+            $done += count($chunk);
+            $this->progress->advance($done, "{$done} de {$total} archivos");
+        }
+    }
     private function restoreMedia(string $mediaDir): void
     {
-        $copied = 0;
+        // Se cuenta el total de los DOS discos antes de copiar: el avance tiene que ir
+        // de 0 a N una sola vez. Contando por disco, la barra se reiniciaría a la mitad
+        // al pasar del público al privado.
+        $plan = [];
 
         foreach (config('snapshot.media', []) as $relative) {
             $from = $mediaDir . '/' . $relative;
             if (! is_dir($from)) continue;
 
+            $plan[$relative] = File::allFiles($from);
+        }
+
+        $total  = array_sum(array_map('count', $plan));
+        $copied = 0;
+
+        $this->progress?->phase('archivos', $total);
+
+        foreach ($plan as $relative => $files) {
             $to = storage_path($relative);
             File::ensureDirectoryExists($to);
 
-            foreach (File::allFiles($from) as $file) {
+            foreach ($files as $file) {
                 $target = $to . DIRECTORY_SEPARATOR . $file->getRelativePathname();
                 File::ensureDirectoryExists(dirname($target));
                 File::copy($file->getPathname(), $target, true);
                 $copied++;
+                $this->progress?->advance($copied, "{$copied} de {$total} archivos");
             }
         }
 

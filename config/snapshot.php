@@ -18,6 +18,12 @@ return [
     // en las rutas típicas de Windows y Linux.
     'pg_bin' => env('PG_BIN', ''),
 
+    // El PHP de CONSOLA, para lanzar la importación como proceso aparte. Vacío = se
+    // deduce del bindir de este PHP. Bajo PHP-FPM no se puede usar PHP_BINARY (apunta
+    // al binario de FPM, que no corre artisan). En Plesk suele ser
+    // /opt/plesk/php/8.2/bin/php.
+    'php_binary' => env('PHP_CLI_BINARY', ''),
+
     // Dónde se guardan los ZIP generados (relativo al disco 'local').
     'path' => 'snapshots',
 
