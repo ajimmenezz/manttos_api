@@ -422,6 +422,44 @@ abstract class Pdf extends FPDF
      * Barras horizontales con etiqueta y valor, como las del tablero original.
      * `$rows` = [['label'=>string,'count'=>int], …] ya ordenado y recortado.
      */
+    /**
+     * Color de la gráfica número `$i`.
+     *
+     * Todos los tableros salían del mismo azul: correctos pero planos, y con ocho
+     * gráficas seguidas cuesta distinguir dónde acaba una y empieza otra. Se cicla una
+     * paleta **encabezada por el color de marca del cliente**, así el documento abre con
+     * su identidad y a partir de ahí cada bloque se lee aparte.
+     *
+     * Los tonos son deliberadamente frescos y de saturación media: el rojo intenso queda
+     * fuera porque en un reporte lee como alarma, y «Ranking por cliente» no es una alarma.
+     */
+    protected function chartColor(int $i): array
+    {
+        $palette = [
+            $this->brandPrimary,
+            [16, 185, 129],   // esmeralda
+            [139, 92, 246],   // violeta
+            [245, 158, 11],   // ámbar
+            [6, 182, 212],    // cian
+            [236, 72, 153],   // rosa
+            [132, 204, 22],   // lima
+            [251, 146, 60],   // naranja
+        ];
+
+        return $palette[$i % count($palette)];
+    }
+
+    /** Mezcla hacia el blanco: 0 = el color, 1 = blanco. */
+    protected function tint(array $rgb, float $k): array
+    {
+        $k = max(0, min(1, $k));
+
+        return [
+            (int) round($rgb[0] + (255 - $rgb[0]) * $k),
+            (int) round($rgb[1] + (255 - $rgb[1]) * $k),
+            (int) round($rgb[2] + (255 - $rgb[2]) * $k),
+        ];
+    }
     protected function hBars(array $rows, float $x, float $y, float $w, float $h, array $rgb): void
     {
         if (! $rows) { $this->emptyBox($x, $y, $w, $h); return; }
@@ -443,7 +481,10 @@ abstract class Pdf extends FPDF
             $this->Cell($labelW, $rowH, $this->fit((string) $row['label'], $labelW - 1), 0, 0, 'R');
 
             $len = max(0.6, $trackW * ($row['count'] / $max));
-            $this->fill($rgb);
+            // Cada barra se aclara un poco respecto de la anterior: da profundidad y refuerza
+            // el orden sin necesidad de otra leyenda. Se topa en 0.45 para que la última
+            // siga siendo legible sobre blanco.
+            $this->fill($this->tint($rgb, count($rows) > 1 ? 0.45 * $i / (count($rows) - 1) : 0));
             $this->Rect($x + $labelW + 2, $ry + ($rowH - $barH) / 2, $len, $barH, 'F');
 
             $this->SetFont('Arial', 'B', 6.5);
@@ -468,7 +509,7 @@ abstract class Pdf extends FPDF
             $cx  = $x + $i * $slot + $slot / 2;
             $len = max(0.4, $plotH * ($row['count'] / $max));
 
-            $this->fill($rgb);
+            $this->fill($this->tint($rgb, count($rows) > 1 ? 0.4 * $i / (count($rows) - 1) : 0));
             $this->Rect($cx - $barW / 2, $y + $plotH - $len + 4, $barW, $len, 'F');
 
             if ($showLabels) {

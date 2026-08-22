@@ -273,7 +273,13 @@ class EventDashboardController extends Controller
         // `printable_sections` alimenta el selector de bloques del diálogo de descarga.
         // Viaja aquí —y no en el endpoint de configuración— porque ése exige
         // `report-sections.manage`, que quien sólo exporta no tiene.
-        $payload['printable_sections'] = ReportSections::printable('events', $hidden);
+        // Los KPIs dinámicos dependen de qué campos marcó cada cliente, así que no caben
+        // en el catálogo: se ofrecen uno por uno a partir de lo que trae este payload.
+        $payload['printable_sections'] = array_merge(
+            ReportSections::printable('events', $hidden),
+            \App\Support\BreakdownBlocks::options($payload['form_breakdowns'] ?? [], 'form', 'Campos del formulario'),
+            \App\Support\BreakdownBlocks::options($payload['directory_breakdowns'] ?? [], 'directory', 'Datos del directorio'),
+        );
 
         return response()->json(ReportSections::stripPayload($payload, 'events', $hidden));
     }
@@ -348,6 +354,14 @@ class EventDashboardController extends Controller
         // detalle completo ni un resumen útil, y se comía la mitad del documento; para
         // llevarse los registros uno por uno está la descarga a Excel, y para leerlos con
         // su detalle real, la bitácora. El imprimible se queda con indicadores y gráficas.
+
+        // KPIs dinámicos: van después de las gráficas fijas y antes del resumen de
+        // filtros, que siempre cierra el documento.
+        $blocks = array_merge(
+            $blocks,
+            \App\Support\BreakdownBlocks::build($payload['form_breakdowns'] ?? [], $shows, 'form'),
+            \App\Support\BreakdownBlocks::build($payload['directory_breakdowns'] ?? [], $shows, 'directory'),
+        );
 
         // Al final, qué recorte de datos representa el documento: un PDF archivado no
         // dice por sí solo si esas cifras eran de un sitio, de un cliente o de todo.
@@ -564,7 +578,13 @@ class EventDashboardController extends Controller
                 'yes' => $yes, 'no' => $total - $yes, 'yes_pct' => (int) round($yes / $total * 100)];
         }
 
-        if (in_array($type, ['number', 'currency'], true)) {
+        // REGLA: un campo del DIRECTORIO identifica DÓNDE pasó algo (panel 1, lazo 5).
+        // Sumarlo o promediarlo no significa nada —«promedio de panel 1.04» no es un dato—:
+        // de estos campos sólo interesa CUÁNTOS registros hay en cada valor, así que se
+        // tratan como reparto aunque el campo sea numérico.
+        $countOnly = ($row['source'] ?? null) === 'directory';
+
+        if (! $countOnly && in_array($type, ['number', 'currency'], true)) {
             $nums = collect($subset)->map($valueFn)->filter(fn ($v) => is_numeric($v))->map(fn ($v) => (float) $v)->values();
             return $row + ['kind' => 'numeric', 'answered' => $nums->count(),
                 'sum' => $nums->isEmpty() ? null : round($nums->sum(), 2),

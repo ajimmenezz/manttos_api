@@ -33,6 +33,9 @@ class DashboardPdf extends Pdf
         $pending = null;
         $last    = count($blocks) - 1;
 
+        // Cuenta de gráficas dibujadas: da a cada una su color de la paleta.
+        $this->chartIndex = 0;
+
         foreach ($blocks as $i => $block) {
             if ($i === $last) $this->reserveTailForSignature();
 
@@ -88,6 +91,9 @@ class DashboardPdf extends Pdf
         }
     }
 
+    /** Cuántas gráficas van pintadas, para ir rotando la paleta. */
+    private int $chartIndex = 0;
+
     private function barsRow(array $left, ?array $right): void
     {
         $h = self::PANEL_H;
@@ -98,12 +104,12 @@ class DashboardPdf extends Pdf
         $w    = $full ? self::CONTENT_W : self::COL_W;
 
         $cy = $this->panel(self::MARGIN, $y, $w, $h, $left['title'] ?? '');
-        $this->hBars($left['rows'] ?? [], self::MARGIN + 1, $cy, $w - 2, $h - 11, $this->brandInk);
+        $this->hBars($left['rows'] ?? [], self::MARGIN + 1, $cy, $w - 2, $h - 11, $this->chartColor($this->chartIndex++));
 
         if ($right) {
             $x  = self::MARGIN + self::COL_W + self::GUTTER;
             $cy = $this->panel($x, $y, self::COL_W, $h, $right['title'] ?? '');
-            $this->hBars($right['rows'] ?? [], $x + 1, $cy, self::COL_W - 2, $h - 11, $this->brandInk);
+            $this->hBars($right['rows'] ?? [], $x + 1, $cy, self::COL_W - 2, $h - 11, $this->chartColor($this->chartIndex++));
         }
 
         $this->y = $y + $h + 4;
@@ -116,7 +122,7 @@ class DashboardPdf extends Pdf
         $y = $this->y;
 
         $cy = $this->panel(self::MARGIN, $y, self::CONTENT_W, $h, $block['title'] ?? '');
-        $this->vBars($block['rows'] ?? [], self::MARGIN + 2, $cy, self::CONTENT_W - 4, $h - 11, $this->brandInk);
+        $this->vBars($block['rows'] ?? [], self::MARGIN + 2, $cy, self::CONTENT_W - 4, $h - 11, $this->chartColor($this->chartIndex++));
 
         $this->y = $y + $h + 4;
     }
