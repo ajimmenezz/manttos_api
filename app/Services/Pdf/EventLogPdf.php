@@ -280,7 +280,7 @@ class EventLogPdf extends Pdf
     /** Miniaturas en fila. La evidencia se ve, pero sin comerse la hoja. */
     private function thumbs(string $label, array $images): void
     {
-        $images = array_values(array_filter($images));
+        $images = array_values(array_filter($images, fn ($i) => is_array($i) && ! empty($i['file'])));
         if (! $images) return;
 
         $extra  = max(0, count($images) - self::MAX_THUMBS);
@@ -295,7 +295,7 @@ class EventLogPdf extends Pdf
         $this->SetFont('Arial', '', self::F_LABEL);
         $this->ink(self::MUTED);
         $this->SetXY(self::MARGIN + self::PAD, $this->y);
-        $this->Cell(self::CONTENT_W, 3.2, $this->fit(mb_strtoupper($label, 'UTF-8') . ($extra ? " (+{$extra} más)" : ''), self::CONTENT_W), 0, 0, 'L');
+        $this->Cell(self::CONTENT_W, 3.2, $this->fit(mb_strtoupper($label, 'UTF-8') . ($extra ? " (+{$extra} más)" : '') . '  ·  clic para ver en grande', self::CONTENT_W), 0, 0, 'L');
         $this->y += 3.4;
 
         foreach (array_chunk($images, $perRow) as $chunk) {
@@ -303,11 +303,19 @@ class EventLogPdf extends Pdf
             $y = $this->y;
 
             foreach (array_values($chunk) as $i => $img) {
-                $x = self::MARGIN + self::PAD + $i * ($w + 2);
+                $x    = self::MARGIN + self::PAD + $i * ($w + 2);
+                $file = $img['file'] ?? null;
+                if (! $file) continue;
+
                 try {
-                    $this->Image($img, $x, $y, $w, $h, $this->imageType($img));
+                    $this->Image($file, $x, $y, $w, $h, $this->imageType($file));
                     $this->draw(self::LINE);
                     $this->Rect($x, $y, $w, $h);
+
+                    // Zona enlazada sobre la miniatura: en el PDF se ve chica, pero un clic
+                    // abre la foto original en el navegador. La miniatura no tiene detalle
+                    // suficiente para revisar una evidencia; la original sí.
+                    if (! empty($img['url'])) $this->Link($x, $y, $w, $h, $img['url']);
                 } catch (\Throwable) {
                     // foto ilegible: se omite, nunca tumba el documento
                 }

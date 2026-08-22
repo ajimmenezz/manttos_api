@@ -345,10 +345,25 @@ class SnapshotImport extends Command
                     ? "\"{$column}\" = REPLACE(\"{$column}\"::text, ?, ?)::{$type}"
                     : "\"{$column}\" = REPLACE(\"{$column}\", ?, ?)";
 
-                $changed += DB::update(
-                    "update \"{$table}\" set {$expr} where \"{$column}\"::text like ?",
-                    [$origin, $target, '%' . $origin . '%'],
-                );
+                // Dos formas del MISMO dominio, y hay que sustituir las dos:
+                //   json  → Postgres guarda el texto tal cual, con las barras escapadas por
+                //           json_encode de PHP: «https:\/\/host\/storage».
+                //   jsonb → Postgres normaliza y quedan «https://host/storage».
+                // Buscando sólo la segunda, las columnas `json` se quedaban sin reapuntar y
+                // el clon seguía pidiéndole las imágenes al servidor de ORIGEN.
+                $pairs = [[$origin, $target]];
+                $escaped = str_replace('/', '\/', $origin);
+                if ($escaped !== $origin) $pairs[] = [$escaped, str_replace('/', '\/', $target)];
+
+                foreach ($pairs as [$search, $replace]) {
+                    // `strpos`, no `LIKE`: en PostgreSQL la barra invertida es el carácter
+                    // de escape de LIKE, así que un patrón con «\/» acaba buscando «/» y no
+                    // encuentra nunca la forma escapada que es justo la que hay que corregir.
+                    $changed += DB::update(
+                        "update \"{$table}\" set {$expr} where strpos(\"{$column}\"::text, ?) > 0",
+                        [$search, $replace, $search],
+                    );
+                }
             }
         }
 

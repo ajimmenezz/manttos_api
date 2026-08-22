@@ -30,5 +30,5 @@ class EventStatusHistory extends Model
     public function event()      { return $this->belongsTo(Event::class); }
     public function fromStatus() { return $this->belongsTo(EventStatus::class, 'from_status_id'); }
     public function toStatus()   { return $this->belongsTo(EventStatus::class, 'to_status_id'); }
-    public function user()       { return $this->belongsTo(User::class, 'user_id'); }
+    public function user()       { return $this->belongsTo(User::class, 'user_id')->withTrashed(); }
 }

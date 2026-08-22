@@ -25,11 +25,11 @@ class ActivityLog extends Model
 
     public function user()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class)->withTrashed();
     }
 
     public function impersonator()
     {
-        return $this->belongsTo(User::class, 'impersonator_id');
+        return $this->belongsTo(User::class, 'impersonator_id')->withTrashed();
     }
 }

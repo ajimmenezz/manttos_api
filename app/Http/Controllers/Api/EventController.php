@@ -530,7 +530,14 @@ class EventController extends Controller
             ->withBranding(\App\Support\Tenant::fromRequest($request))
             ->render();
 
-        return response()->streamDownload(fn () => print($binary), 'bitacora-de-eventos.pdf', [
+        $name = \App\Support\PrintableName::build(
+            'Bitacora Eventos',
+            $payload['site']['name'] ?? null,
+            $payload['from'] ?? null,
+            $payload['to'] ?? null,
+        );
+
+        return response()->streamDownload(fn () => print($binary), $name, [
             'Content-Type' => 'application/pdf',
         ]);
     }
@@ -625,17 +632,26 @@ class EventController extends Controller
     }
 
     /**
-     * URLs → rutas en disco. FPDF no descarga nada: si no está el archivo, la foto
-     * simplemente no sale.
+     * Cada imagen viaja como {file, url}: `file` es la miniatura en disco que FPDF
+     * incrusta —no descarga nada, si no está el archivo la foto no sale— y `url` es la
+     * dirección pública, que se usa para dejar la miniatura ENLAZADA. Así, quien reciba
+     * el PDF puede abrir la foto en grande con un clic.
      */
     private function bitacoraImages(mixed $value): array
     {
         $urls = is_array($value) ? $value : (is_string($value) && $value !== '' ? [$value] : []);
+        $out  = [];
 
-        return array_values(array_filter(array_map(
-            fn ($u) => is_string($u) ? \App\Support\MediaFile::thumbnail(\App\Support\MediaFile::path($u)) : null,
-            $urls,
-        )));
+        foreach ($urls as $url) {
+            if (! is_string($url) || $url === '') continue;
+
+            $file = \App\Support\MediaFile::thumbnail(\App\Support\MediaFile::path($url));
+            if (! $file) continue;
+
+            $out[] = ['file' => $file, 'url' => $url];
+        }
+
+        return $out;
     }
 
     private function rangeLabel(?string $from, ?string $to): string

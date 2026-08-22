@@ -166,7 +166,7 @@ class ExecutiveReportController extends Controller
             ['source' => 'request'],
         );
 
-        $name = Str::slug($site->name . '-' . $data['meta']['period_label']) . '.pdf';
+        $name = \App\Support\PrintableName::build('Reporte Ejecutivo', $site->name, $from, $to);
 
         return response()->streamDownload(fn () => print($binary), $name, [
             'Content-Type' => 'application/pdf',

@@ -26,7 +26,10 @@ return [
 
     'allowed_headers' => ['*'],
 
-    'exposed_headers' => [],
+    // El front lee de aquí el nombre del archivo que arma el servidor para los PDF;
+    // sin exponerla, el navegador oculta la cabecera en peticiones de otro dominio
+    // (el API y el front viven en dominios distintos en producción).
+    'exposed_headers' => ['Content-Disposition'],
 
     'max_age' => 0,
 
