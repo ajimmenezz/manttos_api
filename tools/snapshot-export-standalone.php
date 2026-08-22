@@ -23,6 +23,12 @@ if (PHP_SAPI !== 'cli') {
 @set_time_limit(0);
 @ini_set('memory_limit', '512M');
 
+// Se comprueba ANTES del volcado: en una instalación real pg_dump tarda minutos y
+// descubrir aquí que falta una extensión ahorra esa espera.
+foreach (['ZipArchive' => 'zip', 'PDO' => 'pdo_pgsql'] as $class => $ext) {
+    if (! class_exists($class)) fail("A este PHP le falta la extensión «{$ext}». Actívala (en Plesk: PHP Settings del dominio) y vuelve a correrlo.");
+}
+
 // Funciona en la raíz del API o dentro de tools/ (o desde donde se invoque).
 $root = null;
 foreach ([__DIR__, dirname(__DIR__), getcwd()] as $candidate) {
