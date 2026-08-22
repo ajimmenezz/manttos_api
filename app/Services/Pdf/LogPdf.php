@@ -3,13 +3,17 @@
 namespace App\Services\Pdf;
 
 /**
- * Bitácora de eventos como DOCUMENTO, no como tabla.
+ * Una bitácora como DOCUMENTO, no como tabla. La usan la de EVENTOS y la de
+ * MANTENIMIENTO: las dos se leen igual porque las dibuja el mismo renderizador.
  *
- * La versión anterior era una tabla de seis columnas: cabía todo pero no se leía nada
- * —el detalle del formulario terminaba apelmazado en una celda "Detalle"— y los campos
- * dinámicos de cada tipo de evento se perdían. Aquí cada evento es una ficha con lo
- * mismo que muestra la pantalla: datos del evento, del dispositivo ligado si lo hay,
- * descripción, y los campos del formulario marcados para bitácora.
+ * Antes cada una era una tabla de seis columnas: cabía todo pero no se leía nada —el
+ * detalle del formulario terminaba apelmazado en una celda "Detalle"— y los campos
+ * dinámicos se perdían. Aquí cada registro es una ficha con lo mismo que muestra la
+ * pantalla: sus datos, el dispositivo si lo hay y los campos marcados para bitácora.
+ *
+ * El contenido llega ya resuelto y con nombres genéricos (`title`, `badge`, `pairs`,
+ * `wide`, `blocks`, `fields`, `images`): el renderizador no sabe si son eventos o
+ * capturas, y por eso puede servir a ambas sin ramas internas.
  *
  * Está apretado a propósito, como una forma impresa: cuerpo de 7.2 pt, rótulos de 6 pt
  * y renglones de 3.5 mm. El objetivo es no gastar hojas de más sin perder información,
@@ -19,7 +23,7 @@ namespace App\Services\Pdf;
  * `ensureSpace()`, de modo que una ficha larga se parte entre hojas sin cálculos
  * previos que puedan quedar desincronizados con lo que realmente se pinta.
  */
-class EventLogPdf extends Pdf
+class LogPdf extends Pdf
 {
     private const PAD      = 2.2;    // aire interno de cada ficha
     private const LINE_H   = 3.5;    // alto de renglón
@@ -43,13 +47,13 @@ class EventLogPdf extends Pdf
         foreach ($this->data['days'] ?? [] as $day) {
             $this->dayHeader((string) ($day['label'] ?? ''));
 
-            foreach ($day['events'] ?? [] as $event) {
-                $this->event($event);
+            foreach ($day['entries'] ?? [] as $entry) {
+                $this->entry($entry);
             }
         }
 
         if ($count === 0) {
-            $this->paragraph('No hay eventos registrados en el periodo seleccionado.');
+            $this->paragraph('No hay registros en el periodo seleccionado.');
         }
 
         if ($this->signature === 'end') $this->signatureBlock();
@@ -62,7 +66,9 @@ class EventLogPdf extends Pdf
         $this->SetFont('Arial', '', 7.5);
         $this->ink(self::MUTED);
         $this->SetXY(self::MARGIN, $this->y);
-        $this->Cell(self::CONTENT_W, 4, $this->t($count . ' evento' . ($count === 1 ? '' : 's') . ' en el periodo'), 0, 0, 'L');
+        // El sustantivo lo pone quien arma los datos: «eventos» o «capturas».
+        $noun = $this->data['summary']['noun'] ?? 'registro';
+        $this->Cell(self::CONTENT_W, 4, $this->t($count . ' ' . $noun . ($count === 1 ? '' : 's') . ' en el periodo'), 0, 0, 'L');
 
         $this->y += 6;
     }
@@ -87,37 +93,37 @@ class EventLogPdf extends Pdf
         $this->y += 7;
     }
 
-    private function event(array $e): void
+    private function entry(array $e): void
     {
         // La banda y las primeras líneas viajan juntas: un encabezado de ficha solo al
-        // pie de la hoja obliga a pasar la página para saber de qué evento se habla.
+        // pie de la hoja obliga a pasar la página para saber de qué registro se habla.
         $this->ensureSpace(22);
         $this->band($e);
 
-        $this->pairs([
-            ['Fecha',    trim(($e['date'] ?? '') . ' ' . ($e['time'] ?? ''))],
-            ['Estado',   $e['status'] ?? null],
-            ['Prioridad', $e['priority'] ?? null],
-            ['Creado por', $e['creator'] ?? null],
-            ['Asignado a', $e['assignee'] ?? null],
-        ]);
+        $this->pairs($e['pairs'] ?? []);
 
-        if (! empty($e['device'])) $this->wide('Dispositivo', (string) $e['device']);
+        // Valores que no caben en media línea (dispositivo, directorio…).
+        foreach ($e['wide'] ?? [] as [$label, $value]) {
+            if (trim((string) $value) !== '') $this->wide((string) $label, (string) $value);
+        }
 
-        if (! empty($e['description'])) $this->block('Descripción', (string) $e['description']);
+        // Rótulo arriba y texto corrido debajo (descripción, notas…).
+        foreach ($e['blocks'] ?? [] as [$label, $text]) {
+            if (trim((string) $text) !== '') $this->block((string) $label, (string) $text);
+        }
 
         foreach ($e['fields'] ?? [] as $field) $this->field($field);
 
-        if (! empty($e['images'])) $this->thumbs('Imágenes del evento', $e['images']);
+        if (! empty($e['images'])) $this->thumbs($e['images_label'] ?? 'Imágenes', $e['images']);
 
-        // Cierre de la ficha: sin él, dos eventos seguidos se leen como uno solo.
+        // Cierre de la ficha: sin él, dos registros seguidos se leen como uno solo.
         $this->ensureSpace(3);
         $this->draw(self::LINE);
         $this->Line(self::MARGIN, $this->y + 0.5, self::MARGIN + self::CONTENT_W, $this->y + 0.5);
         $this->y += 3.5;
     }
 
-    /** Banda de identificación: tipo · sistema a la izquierda, folio a la derecha. */
+    /** Banda de identificación: título a la izquierda, distintivo (folio, DID…) a la derecha. */
     private function band(array $e): void
     {
         $h = 5.4;
@@ -125,26 +131,26 @@ class EventLogPdf extends Pdf
         $this->fill(self::TINT);
         $this->Rect(self::MARGIN, $this->y, self::CONTENT_W, $h, 'F');
 
-        // Filete del color del estado: da la lectura de un vistazo, como el punto de
-        // color de la pantalla.
-        if ($rgb = $this->hex($e['status_color'] ?? null)) {
+        // Filete de color (el estado del evento, por ejemplo): da la lectura de un
+        // vistazo, como el punto de color de la pantalla.
+        if ($rgb = $this->hex($e['accent'] ?? null)) {
             $this->fill($rgb);
             $this->Rect(self::MARGIN, $this->y, 1.4, $h, 'F');
         }
 
-        $folio  = (string) ($e['folio'] ?? '');
-        $folioW = 0;
+        $badge  = (string) ($e['badge'] ?? '');
+        $badgeW = 0;
 
-        if ($folio !== '') {
+        if ($badge !== '') {
             $this->SetFont('Arial', 'B', 7.5);
-            $folioW = $this->GetStringWidth($this->t($folio)) + 2;
+            $badgeW = $this->GetStringWidth($this->t($badge)) + 2;
             $this->ink($this->brandInk);
-            $this->SetXY(self::MARGIN + self::CONTENT_W - $folioW - self::PAD, $this->y + 1.1);
-            $this->Cell($folioW, 3.4, $this->t($folio), 0, 0, 'R');
+            $this->SetXY(self::MARGIN + self::CONTENT_W - $badgeW - self::PAD, $this->y + 1.1);
+            $this->Cell($badgeW, 3.4, $this->t($badge), 0, 0, 'R');
         }
 
-        $title = trim(implode(' · ', array_filter([$e['type'] ?? null, $e['system'] ?? null])));
-        $w     = self::CONTENT_W - $folioW - 2 * self::PAD - 2;
+        $title = trim((string) ($e['title'] ?? ''));
+        $w     = self::CONTENT_W - $badgeW - 2 * self::PAD - 2;
 
         $this->SetFont('Arial', 'B', 7.5);
         $this->ink(self::INK);
@@ -172,6 +178,15 @@ class EventLogPdf extends Pdf
 
         $colW = (self::CONTENT_W - 2 * self::PAD - self::GAP) / 2;
 
+        // El rótulo se ensancha hasta donde haga falta (con tope): con un ancho fijo,
+        // etiquetas del directorio como «TIPO DISPOSITIVO» salían recortadas.
+        $this->SetFont('Arial', '', self::F_LABEL);
+        $labelW = self::LABEL_W;
+        foreach ($pairs as [$label, ]) {
+            $labelW = max($labelW, $this->GetStringWidth($this->t(mb_strtoupper((string) $label, 'UTF-8'))) + 2);
+        }
+        $labelW = min($labelW, $colW * 0.45);
+
         foreach (array_chunk($pairs, 2) as $row) {
             $this->ensureSpace(self::LINE_H + 1);
             $y = $this->y;
@@ -182,12 +197,12 @@ class EventLogPdf extends Pdf
                 $this->SetFont('Arial', '', self::F_LABEL);
                 $this->ink(self::MUTED);
                 $this->SetXY($x, $y);
-                $this->Cell(self::LABEL_W, self::LINE_H, $this->fit(mb_strtoupper((string) $label, 'UTF-8'), self::LABEL_W), 0, 0, 'L');
+                $this->Cell($labelW, self::LINE_H, $this->fit(mb_strtoupper((string) $label, 'UTF-8'), $labelW), 0, 0, 'L');
 
                 $this->SetFont('Arial', '', self::F_VALUE);
                 $this->ink(self::INK);
-                $this->SetXY($x + self::LABEL_W, $y);
-                $this->Cell($colW - self::LABEL_W, self::LINE_H, $this->fit((string) $value, $colW - self::LABEL_W), 0, 0, 'L');
+                $this->SetXY($x + $labelW, $y);
+                $this->Cell($colW - $labelW, self::LINE_H, $this->fit((string) $value, $colW - $labelW), 0, 0, 'L');
             }
 
             $this->y = $y + self::LINE_H;

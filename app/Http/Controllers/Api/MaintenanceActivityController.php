@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\MaintenanceActivityFilters;
 use App\Models\ActivityTypeField;
+use App\Models\SystemField;
 use App\Models\AppSetting;
 use App\Models\Catalog;
 use App\Models\Device;
@@ -260,36 +261,65 @@ class MaintenanceActivityController extends Controller
      * GET /maintenances/{maintenance}/log-pdf — la bitácora del mantenimiento en PDF,
      * con la misma consulta y filtros que la pestaña.
      */
+    /**
+     * GET /maintenances/{maintenance}/log-pdf — la bitácora como DOCUMENTO.
+     *
+     * Misma ficha que la bitácora de eventos (la dibuja el mismo `LogPdf`): antes era una
+     * tabla de seis columnas donde el detalle capturado se resumía a 300 caracteres en una
+     * celda, perdiendo justo lo que interesa revisar.
+     */
     public function logPdf(Request $request, Maintenance $maintenance): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         $payload = $this->log($request, $maintenance)->getData(true);
-
-        $rows = array_map(function (array $e) {
-            $device = $e['device'] ?? null;
-            $values = $e['field_values'] ?? [];
-
-            $detail = [];
-            foreach ($values as $k => $v) {
-                if (str_starts_with((string) $k, '_')) continue;      // metadata interna
-                if (is_array($v)) $v = implode(', ', array_filter($v, 'is_scalar'));
-                if ($v === null || $v === '' || is_bool($v)) continue;
-                if (filter_var((string) $v, FILTER_VALIDATE_URL)) continue;  // imágenes/firmas
-                $detail[] = (string) $v;
-            }
-
-            return [
-                substr((string) ($e['performed_at'] ?? ''), 0, 10),
-                (string) ($e['activity_type']['label'] ?? ''),
-                (string) ($device['name'] ?? '—'),
-                (string) ($device['directory_name'] ?? ''),
-                (string) ($e['user']['name'] ?? ''),
-                mb_substr(implode(' · ', $detail), 0, 300),
-            ];
-        }, $payload['entries'] ?? []);
+        $entries = $payload['entries'] ?? [];
 
         $maintenance->loadMissing(['site:id,name,client_id', 'site.client:id,name', 'system:id,label']);
+        $systemId = (int) $maintenance->catalog_id;
 
-        $binary = (new \App\Services\Pdf\DashboardPdf([
+        // Campos del DIRECTORIO marcados para bitácora (los de la tarjeta de dispositivo).
+        // OJO: la columna es `catalog_id` (un sistema es un catálogo), y sólo la
+        // plantilla BASE —`client_id` nulo—, que es exactamente lo que pide la pantalla.
+        $deviceFields = SystemField::where('catalog_id', $systemId)
+            ->whereNull('client_id')
+            ->where('is_active', true)
+            ->where('show_in_bitacora', true)
+            ->orderBy('sort_order')->orderBy('id')
+            ->get();
+
+        // Campos del FORMULARIO marcados para bitácora, por tipo de actividad presente.
+        $typeIds = collect($entries)->pluck('activity_type.id')->filter()->unique();
+
+        $formFields = ActivityTypeField::whereIn('activity_type_id', $typeIds)
+            ->where('system_id', $systemId)
+            ->where('is_active', true)
+            ->where('show_in_bitacora', true)
+            ->orderBy('sort_order')->orderBy('id')
+            ->get()
+            ->groupBy('activity_type_id');
+
+        $didKey = $this->didKeyForSystem($systemId, $maintenance->site?->client_id);
+
+        // Sólo quien puede ver la fecha de registro la recibe impresa: el PDF respeta el
+        // mismo permiso que la pantalla.
+        $showCreated = $request->user()?->can('activities.view-registration-date') ?? false;
+
+        $days = [];
+
+        foreach ($entries as $e) {
+            $when = Carbon::parse($e['performed_at'] ?? now());
+            $key  = $when->toDateString();
+
+            $days[$key] ??= [
+                'label'   => $when->locale('es')->isoFormat('dddd D [de] MMMM [de] YYYY'),
+                'entries' => [],
+            ];
+
+            $days[$key]['entries'][] = $this->logCard($e, $deviceFields, $formFields, $didKey, $when, $showCreated);
+        }
+
+        ksort($days);
+
+        $binary = (new \App\Services\Pdf\LogPdf([
             'meta' => [
                 'title'        => 'Bitácora del mantenimiento',
                 'client'       => $maintenance->site?->client?->name,
@@ -300,29 +330,82 @@ class MaintenanceActivityController extends Controller
                     : 'Todo el periodo',
                 'generated_at' => now()->toDateTimeString(),
             ],
-            'kpis'   => [['label' => 'Capturas en el periodo', 'value' => (string) count($rows)]],
-            'blocks' => [[
-                'type'  => 'table',
-                'title' => 'Registro cronológico',
-                'cols'  => [
-                    ['label' => 'Fecha',       'w' => 20],
-                    ['label' => 'Actividad',   'w' => 30],
-                    ['label' => 'Dispositivo', 'w' => 34],
-                    ['label' => 'Directorio',  'w' => 28],
-                    ['label' => 'Capturó',     'w' => 30],
-                    ['label' => 'Detalle',     'w' => 48],
-                ],
-                'rows' => $rows,
-                'size' => 6.5,
-            ]],
+            'summary' => ['count' => count($entries), 'noun' => 'captura'],
+            'days'    => array_values($days),
         ]))
             ->withSignature($request->input('signature'), $request->input('signature_align'))
             ->withBranding(\App\Support\Tenant::fromRequest($request))
             ->render();
 
-        return response()->streamDownload(fn () => print($binary), 'bitacora-mantenimiento-' . $maintenance->id . '.pdf', [
+        $name = \App\Support\PrintableName::build(
+            'Bitacora Mantenimiento',
+            trim(($maintenance->site?->name ?? '') . ' ' . ($maintenance->system?->label ?? '')),
+            $request->input('date_from'),
+            $request->input('date_to'),
+        );
+
+        return response()->streamDownload(fn () => print($binary), $name, [
             'Content-Type' => 'application/pdf',
         ]);
+    }
+
+    /** Una captura, ya formateada para imprimir. */
+    private function logCard(array $e, $deviceFields, $formFields, string $didKey, Carbon $when, bool $showCreated): array
+    {
+        $device = $e['device'] ?? null;
+        $cf     = is_array($device['custom_fields'] ?? null) ? $device['custom_fields'] : [];
+        $did    = $cf[$didKey] ?? null;
+
+        $values = is_array($e['field_values'] ?? null) ? $e['field_values'] : [];
+
+        // Datos del directorio marcados para bitácora: van como pares, que aprietan más
+        // que un bloque por campo y son valores cortos.
+        $pairs = [
+            ['Fecha',      $when->format('d/m/Y')],
+            ['Capturó',    $e['user']['name'] ?? null],
+        ];
+
+        if ($showCreated && ! empty($e['created_at'])) {
+            $pairs[] = ['Registro', Carbon::parse($e['created_at'])->format('d/m/Y H:i')];
+        }
+
+        foreach ($deviceFields as $def) {
+            // El DID ya va como distintivo de la ficha y dentro de la línea del dispositivo:
+            // repetirlo como par sería la tercera vez en la misma tarjeta.
+            if ($def->field_key === $didKey) continue;
+
+            $text = \App\Support\FieldValueText::format($cf[$def->field_key] ?? null, (string) $def->field_type, is_array($def->config) ? $def->config : []);
+            if (trim($text) !== '') $pairs[] = [$def->label, $text];
+        }
+
+        $fields = [];
+        foreach ($formFields[$e['activity_type']['id'] ?? null] ?? [] as $def) {
+            $fields[] = \App\Support\FieldValueText::field([
+                'label'       => $def->label,
+                'field_type'  => $def->field_type,
+                'legend_text' => $def->legend_text,
+                'config'      => $def->config,
+            ], $values[$def->field_key] ?? null);
+        }
+
+        $deviceLine = trim(implode(' · ', array_filter([
+            $device['name'] ?? null,
+            $did ? 'DID ' . $did : null,
+            $device['device_type'] ?? null,
+        ])));
+
+        return [
+            'title'  => (string) ($e['activity_type']['label'] ?? 'Actividad'),
+            // El DID identifica al dispositivo como el folio identifica al evento.
+            'badge'  => $did ? (string) $did : '',
+            'pairs'  => $pairs,
+            'wide'   => [
+                ['Dispositivo', $deviceLine],
+                ['Directorio',  $device['directory_name'] ?? ''],
+            ],
+            'fields' => $fields,
+            'images_label' => 'Imágenes de la captura',
+        ];
     }
 
     public function log(Request $request, Maintenance $maintenance): JsonResponse
