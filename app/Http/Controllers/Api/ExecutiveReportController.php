@@ -155,7 +155,8 @@ class ExecutiveReportController extends Controller
         $data   = (new ExecutiveReport($site, $systemId, $from, $to, $this->configFrom($request, $report)))->build();
 
         $binary = (new ExecutivePdf($data))
-            ->withSignature($request->input('signature'))
+            ->withSignature($request->input('signature'), $request->input('signature_align'))
+            ->withBranding(\App\Support\Tenant::fromRequest($request))
             ->render();
 
         app(\App\Support\ActivityLogger::class)->log(

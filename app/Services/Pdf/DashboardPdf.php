@@ -92,12 +92,12 @@ class DashboardPdf extends Pdf
         $w    = $full ? self::CONTENT_W : self::COL_W;
 
         $cy = $this->panel(self::MARGIN, $y, $w, $h, $left['title'] ?? '');
-        $this->hBars($left['rows'] ?? [], self::MARGIN + 1, $cy, $w - 2, $h - 11, self::NAVY);
+        $this->hBars($left['rows'] ?? [], self::MARGIN + 1, $cy, $w - 2, $h - 11, $this->brandInk);
 
         if ($right) {
             $x  = self::MARGIN + self::COL_W + self::GUTTER;
             $cy = $this->panel($x, $y, self::COL_W, $h, $right['title'] ?? '');
-            $this->hBars($right['rows'] ?? [], $x + 1, $cy, self::COL_W - 2, $h - 11, self::NAVY);
+            $this->hBars($right['rows'] ?? [], $x + 1, $cy, self::COL_W - 2, $h - 11, $this->brandInk);
         }
 
         $this->y = $y + $h + 4;
@@ -110,7 +110,7 @@ class DashboardPdf extends Pdf
         $y = $this->y;
 
         $cy = $this->panel(self::MARGIN, $y, self::CONTENT_W, $h, $block['title'] ?? '');
-        $this->vBars($block['rows'] ?? [], self::MARGIN + 2, $cy, self::CONTENT_W - 4, $h - 11, self::NAVY);
+        $this->vBars($block['rows'] ?? [], self::MARGIN + 2, $cy, self::CONTENT_W - 4, $h - 11, $this->brandInk);
 
         $this->y = $y + $h + 4;
     }

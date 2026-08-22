@@ -2,7 +2,7 @@
 
 namespace App\Services\Pdf;
 
-use App\Models\AppSetting;
+use App\Support\Branding;
 use Carbon\Carbon;
 use FPDF;
 
@@ -53,17 +53,32 @@ abstract class Pdf extends FPDF
     protected ?string $headerNote = null;
 
     /**
+     * Colores de la marca del tenant. Arrancan en los históricos y `withBranding()` los
+     * cambia por los del dominio que pidió el documento. Se guardan como propiedades —y
+     * no como constantes— justamente para que puedan variar por cliente: `self::NAVY`
+     * queda sólo como respaldo.
+     */
+    protected array $brandDark    = self::NAVY;
+    protected array $brandDarkTo  = self::NAVY;
+    /** Tono de TRAZO: títulos, barras y filetes. Ver `withBranding()`. */
+    protected array $brandInk     = self::NAVY;
+    protected array $brandPrimary = [37, 99, 235];
+
+    /**
      * Cierre de conformidad: 'end' = una línea al final del documento, 'page' = una
      * en cada hoja, null = ninguna. Lo elige quien manda a imprimir.
      */
     protected ?string $signature = null;
+
+    /** Dónde se coloca esa línea a lo ancho: 'left' | 'center' | 'right'. */
+    protected string $signatureAlign = 'center';
 
     public function __construct(array $data)
     {
         parent::__construct('P', 'mm', 'A4');
 
         $this->data = $data;
-        $this->logo = $this->resolveLogo();
+        $this->withBranding(null);   // marca base; el controlador la afina por dominio
 
         $this->SetAutoPageBreak(false);   // la paginación la decide ensureSpace()
         $this->SetMargins(self::MARGIN, self::MARGIN, self::MARGIN);
@@ -75,11 +90,52 @@ abstract class Pdf extends FPDF
      * Activa el cierre de conformidad. Es opcional en TODOS los imprimibles porque
      * unos se archivan firmados por el cliente y otros son de consulta interna.
      */
-    public function withSignature(?string $mode): static
+    public function withSignature(?string $mode, ?string $align = null): static
     {
         $this->signature = in_array($mode, ['end', 'page'], true) ? $mode : null;
 
+        // La alineación importa de verdad cuando la firma va en CADA hoja: según cómo se
+        // archive el entregable (engargolado, perforado, sellado a un costado), la línea
+        // estorba en un lado o en el otro.
+        $this->signatureAlign = in_array($align, ['left', 'center', 'right'], true) ? $align : 'center';
+
         return $this;
+    }
+
+    /**
+     * Aplica la identidad del dominio que pidió el documento: logo y colores salen de la
+     * configuración del tenant, igual que la app y los correos.
+     */
+    public function withBranding(?string $tenant): static
+    {
+        $brand = Branding::for($tenant);
+
+        $this->logo         = $brand->logo;
+        $this->brandDark    = $brand->dark;
+        $this->brandDarkTo  = $brand->darkTo;
+
+        // Punto medio del degradado. El extremo oscuro (#0f1f3d en el preset azul) es casi
+        // negro: bien para la banda, pero deja los títulos y las barras sin color de
+        // marca. El extremo claro es demasiado saturado para texto. El medio se lee como
+        // el azul marino de siempre, pero teñido por el preset del cliente.
+        $this->brandInk = [
+            (int) round(($brand->dark[0] + $brand->darkTo[0]) / 2),
+            (int) round(($brand->dark[1] + $brand->darkTo[1]) / 2),
+            (int) round(($brand->dark[2] + $brand->darkTo[2]) / 2),
+        ];
+        $this->brandPrimary = $brand->primary;
+
+        return $this;
+    }
+
+    /** Coordenada X de un bloque de ancho $w según la alineación de la firma. */
+    protected function signatureX(float $w): float
+    {
+        return match ($this->signatureAlign) {
+            'left'  => self::MARGIN,
+            'right' => self::MARGIN + self::CONTENT_W - $w,
+            default => self::MARGIN + (self::CONTENT_W - $w) / 2,
+        };
     }
 
     /** Encabezado a la derecha del membrete (folio, estado, total…). */
@@ -130,36 +186,23 @@ abstract class Pdf extends FPDF
     protected function ink(array $rgb): void  { $this->SetTextColor(...$rgb); }
     protected function draw(array $rgb): void { $this->SetDrawColor(...$rgb); }
 
-    /** El logo del tenant, si se puede resolver a un archivo local legible. */
-    protected function resolveLogo(): ?string
-    {
-        try {
-            $url = AppSetting::allAsMap('default')['logo_url'] ?? null;
-            if (! $url) return null;
-
-            $path = parse_url($url, PHP_URL_PATH) ?: $url;
-            if (! str_contains($path, '/storage/')) return null;
-
-            $file = storage_path('app/public/' . ltrim(explode('/storage/', $path, 2)[1], '/'));
-            $ext  = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-
-            return (is_file($file) && in_array($ext, ['png', 'jpg', 'jpeg'], true)) ? $file : null;
-        } catch (\Throwable) {
-            return null;   // el membrete es un adorno: nunca debe tumbar el reporte
-        }
-    }
 
     // ── Estructura de página ──────────────────────────────────────────────────
 
     public function Header(): void
     {
         $h = 20;
-        $this->fill(self::NAVY);
-        $this->Rect(0, 0, self::PAGE_W, $h, 'F');
 
-        if ($this->logo) {
-            try { $this->Image($this->logo, self::MARGIN, 4, 0, 12); } catch (\Throwable) {}
-        }
+        // Degradado entre los dos extremos de la marca: FPDF no tiene gradientes, se
+        // dibuja en tiras. Es el mismo degradado del encabezado de los correos.
+        $this->gradient(0, 0, self::PAGE_W, $h, $this->brandDark, $this->brandDarkTo);
+
+        // Filete de acento al pie de la banda: remata el membrete y es lo que hace que
+        // el documento se lea como del mismo sistema que la app.
+        $this->fill($this->brandPrimary);
+        $this->Rect(0, $h, self::PAGE_W, 1.2, 'F');
+
+        $logoW = $this->logoBlock($h);
 
         if ($this->headerNote) {
             $this->ink([255, 255, 255]);
@@ -168,25 +211,84 @@ abstract class Pdf extends FPDF
             $this->Cell(45, 6, $this->fit($this->headerNote, 45), 0, 0, 'R');
         }
 
+        // El bloque de texto reserva el MISMO margen a los dos lados para que quede
+        // centrado en la hoja, y ese margen es el del lado que más ocupa. Reservar 45mm
+        // fijos a la derecha "por si hay nota" estrangulaba el título cuando no la hay:
+        // el subtítulo salía recortado sin necesidad.
+        $side  = max($logoW, $this->headerNote ? 45 : 0) + 4;
+        $textW = self::PAGE_W - 2 * (self::MARGIN + $side);
+
         $this->ink([255, 255, 255]);
         $this->SetFont('Arial', 'B', 11);
-        $this->SetXY(self::MARGIN + 22, 5);
-        $this->Cell(self::CONTENT_W - 44, 5, $this->fit($this->str('title'), self::CONTENT_W - 44), 0, 2, 'C');
+        $this->SetXY(self::MARGIN + $side, 4.5);
+        $this->Cell($textW, 5, $this->fit($this->str('title'), $textW), 0, 2, 'C');
 
         $this->SetFont('Arial', '', 8.5);
         $sub = trim($this->str('client') . ' · ' . $this->str('site'), ' ·');
         if ($this->str('system')) $sub .= ' · ' . $this->str('system');
-        $this->Cell(self::CONTENT_W - 44, 4.5, $this->fit($sub, self::CONTENT_W - 44), 0, 2, 'C');
-        $this->Cell(self::CONTENT_W - 44, 4.5, $this->t($this->str('period_label')), 0, 2, 'C');
+        $this->Cell($textW, 4.5, $this->fit($sub, $textW), 0, 2, 'C');
+        $this->Cell($textW, 4.5, $this->fit($this->str('period_label'), $textW), 0, 2, 'C');
 
-        $this->y = $h + 6;
+        $this->y = $h + 7;
+    }
+
+    /**
+     * Logo sobre una tarjeta blanca, y devuelve cuánto ancho ocupó.
+     *
+     * La tarjeta no es adorno: los logos que suben los clientes suelen ser JPEG con
+     * fondo blanco, y puestos directamente sobre la banda de color se ven como un
+     * recuadro sucio. Sobre blanco, cualquier logo se lee bien.
+     */
+    protected function logoBlock(float $bandH): float
+    {
+        if (! $this->logo) return 0;
+
+        try {
+            $size = @getimagesize($this->logo);
+            if (! $size || ! $size[1]) return 0;
+
+            $imgH = 11;
+            $imgW = min(38, $size[0] / $size[1] * $imgH);   // tope: un logo apaisado no puede comerse el título
+            $imgH = $size[1] / $size[0] * $imgW;            // recalcula por si el tope recortó
+            $pad  = 1.5;
+
+            $y = ($bandH - $imgH) / 2;
+
+            $this->fill([255, 255, 255]);
+            $this->Rect(self::MARGIN - $pad, $y - $pad, $imgW + 2 * $pad, $imgH + 2 * $pad, 'F');
+            $this->Image($this->logo, self::MARGIN, $y, $imgW, $imgH);
+
+            return $imgW + $pad;
+        } catch (\Throwable) {
+            return 0;   // el membrete nunca debe tumbar el documento
+        }
+    }
+
+    /** Degradado horizontal por tiras (FPDF no tiene gradientes). */
+    protected function gradient(float $x, float $y, float $w, float $h, array $from, array $to): void
+    {
+        $steps = $from === $to ? 1 : 48;
+        $sw    = $w / $steps;
+
+        for ($i = 0; $i < $steps; $i++) {
+            $k = $steps === 1 ? 0 : $i / ($steps - 1);
+
+            $this->fill([
+                (int) round($from[0] + ($to[0] - $from[0]) * $k),
+                (int) round($from[1] + ($to[1] - $from[1]) * $k),
+                (int) round($from[2] + ($to[2] - $from[2]) * $k),
+            ]);
+
+            // +0.2 de solape: sin él quedan hilos del fondo entre tira y tira.
+            $this->Rect($x + $i * $sw, $y, $sw + 0.2, $h, 'F');
+        }
     }
 
     public function Footer(): void
     {
         if ($this->signature === 'page') {
             $w = 90;
-            $x = self::MARGIN + (self::CONTENT_W - $w) / 2;
+            $x = $this->signatureX($w);
             $y = $this->h - 22;
 
             $this->draw(self::INK);
@@ -197,7 +299,7 @@ abstract class Pdf extends FPDF
             $this->SetFont('Arial', '', 7.5);
             $this->ink(self::INK);
             $this->SetXY($x, $y + 1);
-            $this->Cell($w, 4, $this->t('Nombre y Firma de Conformidad'), 0, 0, 'C');
+            $this->Cell($w, 4, $this->t('Nombre y Firma de Conformidad'), 0, 0, $this->signatureAlign === 'center' ? 'C' : strtoupper($this->signatureAlign[0]));
         }
 
         $this->SetY(-12);
@@ -227,11 +329,11 @@ abstract class Pdf extends FPDF
         $this->ensureSpace(10 + self::PANEL_H + 4);
 
         $this->SetFont('Arial', 'B', 10);
-        $this->ink(self::NAVY);
+        $this->ink($this->brandInk);
         $this->SetXY(self::MARGIN, $this->y);
         $this->Cell(self::CONTENT_W, 6, $this->fit($text, self::CONTENT_W), 0, 0, 'C');
 
-        $this->draw(self::NAVY);
+        $this->draw($this->brandInk);
         $this->SetLineWidth(0.5);
         $this->Line(self::MARGIN, $this->y + 6.8, self::MARGIN + self::CONTENT_W, $this->y + 6.8);
         $this->SetLineWidth(0.2);
@@ -251,7 +353,7 @@ abstract class Pdf extends FPDF
         $this->Line($x, $y + 7, $x + $w, $y + 7);
 
         $this->SetFont('Arial', 'B', 7.5);
-        $this->ink(self::NAVY);
+        $this->ink($this->brandInk);
         $this->SetXY($x + 2, $y + 1.2);
         $this->Cell($w - 4, 4.6, $this->fit($title, $w - 4), 0, 0, 'C');
 
@@ -265,7 +367,7 @@ abstract class Pdf extends FPDF
         $this->fill([255, 255, 255]);
         $this->Rect($x, $y, $w, $h, 'DF');
 
-        $this->fill(self::NAVY);
+        $this->fill($this->brandInk);
         $this->Rect($x, $y, 1.6, $h, 'F');
 
         $this->SetFont('Arial', '', 7.5);
@@ -274,7 +376,7 @@ abstract class Pdf extends FPDF
         $this->Cell($w - 6, 4, $this->fit($label, $w - 6), 0, 2, 'L');
 
         $this->SetFont('Arial', 'B', 16);
-        $this->ink(self::NAVY);
+        $this->ink($this->brandInk);
         $this->Cell($w - 6, 8, $this->t($value), 0, 0, 'L');
     }
 
@@ -380,7 +482,7 @@ abstract class Pdf extends FPDF
         $this->sector($cx, $cy, $r * 0.62, 0, 360);
 
         $this->SetFont('Arial', 'B', 13);
-        $this->ink(self::NAVY);
+        $this->ink($this->brandInk);
         $this->SetXY($cx - $r, $cy - 5);
         $this->Cell($r * 2, 6, $this->t(number_format($pct, 2, ',', '.') . ' %'), 0, 0, 'C');
 
@@ -436,7 +538,7 @@ abstract class Pdf extends FPDF
         $this->ensureSpace(14);
 
         $this->SetFont('Arial', 'B', 8.5);
-        $this->ink(self::NAVY);
+        $this->ink($this->brandInk);
         $this->SetXY(self::MARGIN, $this->y);
         $this->Cell(self::CONTENT_W, 5, $this->fit(mb_strtoupper($text, 'UTF-8'), self::CONTENT_W), 0, 0, 'L');
 
@@ -518,7 +620,7 @@ abstract class Pdf extends FPDF
             $this->fill([244, 247, 251]);
             $this->draw(self::LINE);
             $this->SetFont('Arial', 'B', $size);
-            $this->ink(self::NAVY);
+            $this->ink($this->brandInk);
 
             $x = self::MARGIN;
             foreach ($cols as $c) {
@@ -631,7 +733,7 @@ abstract class Pdf extends FPDF
         $this->ensureSpace(34);
 
         $w  = 110;
-        $x  = self::MARGIN + (self::CONTENT_W - $w) / 2;
+        $x  = $this->signatureX($w);
         $y  = $this->y + 16;
 
         $this->draw(self::INK);
@@ -642,7 +744,7 @@ abstract class Pdf extends FPDF
         $this->SetFont('Arial', '', 8);
         $this->ink(self::INK);
         $this->SetXY($x, $y + 1.5);
-        $this->Cell($w, 5, $this->t($caption), 0, 0, 'C');
+        $this->Cell($w, 5, $this->t($caption), 0, 0, $this->signatureAlign === 'center' ? 'C' : strtoupper($this->signatureAlign[0]));
 
         $this->y = $y + 10;
     }

@@ -315,7 +315,10 @@ class MaintenanceActivityController extends Controller
                 'rows' => $rows,
                 'size' => 6.5,
             ]],
-        ]))->withSignature($request->input('signature'))->render();
+        ]))
+            ->withSignature($request->input('signature'), $request->input('signature_align'))
+            ->withBranding(\App\Support\Tenant::fromRequest($request))
+            ->render();
 
         return response()->streamDownload(fn () => print($binary), 'bitacora-mantenimiento-' . $maintenance->id . '.pdf', [
             'Content-Type' => 'application/pdf',

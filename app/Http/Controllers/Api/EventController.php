@@ -534,7 +534,10 @@ class EventController extends Controller
                 'rows' => $rows,
                 'size' => 6.5,
             ]],
-        ]))->withSignature($request->input('signature'))->render();
+        ]))
+            ->withSignature($request->input('signature'), $request->input('signature_align'))
+            ->withBranding(\App\Support\Tenant::fromRequest($request))
+            ->render();
 
         return response()->streamDownload(fn () => print($binary), 'bitacora-de-eventos.pdf', [
             'Content-Type' => 'application/pdf',
@@ -552,10 +555,17 @@ class EventController extends Controller
     {
         $this->authorizeAccess($request, $event);
 
-        $branding = \App\Models\AppSetting::allAsMap(\App\Support\Tenant::fromRequest($request));
+        $tenant   = \App\Support\Tenant::fromRequest($request);
+        $branding = \App\Models\AppSetting::allAsMap($tenant);
 
         $binary = app(\App\Services\ServiceSheets\ServiceSheetRenderer::class)
-            ->renderPdf($event, $branding, $request->input('signature'));
+            ->renderPdf(
+                $event,
+                $branding,
+                $request->input('signature'),
+                $request->input('signature_align'),
+                $tenant,
+            );
 
         return response()->streamDownload(
             fn () => print($binary),

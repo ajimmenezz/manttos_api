@@ -67,7 +67,13 @@ class GenerateServiceSheetsZip implements ShouldQueue
 
             $used = [];
             foreach ($events as $event) {
-                $pdf = $renderer->renderPdf($event, $branding, $export->signature);
+                $pdf = $renderer->renderPdf(
+                    $event,
+                    $branding,
+                    $export->signature,
+                    $export->signature_align,
+                    $export->tenant,
+                );
                 $name = $this->uniqueName($event->folio ?: ('evento-' . $event->id), $used);
                 $zip->addFromString($name, $pdf);
             }

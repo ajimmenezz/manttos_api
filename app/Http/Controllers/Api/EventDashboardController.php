@@ -366,7 +366,10 @@ class EventDashboardController extends Controller
             ],
             'kpis'   => $kpis,
             'blocks' => $blocks,
-        ]))->withSignature($request->input('signature'))->render();
+        ]))
+            ->withSignature($request->input('signature'), $request->input('signature_align'))
+            ->withBranding(\App\Support\Tenant::fromRequest($request))
+            ->render();
 
         return response()->streamDownload(fn () => print($binary), 'reporte-de-eventos.pdf', [
             'Content-Type' => 'application/pdf',

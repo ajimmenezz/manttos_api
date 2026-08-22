@@ -53,6 +53,9 @@ class ServiceSheetExportController extends Controller
             'signature'    => in_array($request->input('signature'), ['end', 'page'], true)
                 ? $request->input('signature')
                 : null,
+            'signature_align' => in_array($request->input('signature_align'), ['left', 'center', 'right'], true)
+                ? $request->input('signature_align')
+                : null,
         ]);
 
         GenerateServiceSheetsZip::dispatch($export->id);

@@ -64,9 +64,12 @@ class AppSetting extends Model
      * Devuelve los colores hex del preset activo para usarlos en templates de correo.
      * Claves: primary, primary_dark, header_from, header_to, btn_shadow, accent_from, accent_to
      */
-    public static function emailColors(): array
+    public static function emailColors(?string $tenant = null): array
     {
-        $preset = self::allAsMap()['color_preset'] ?? 'blue';
+        // El tenant es opcional para no romper a quien ya la llamaba sin argumentos (el
+        // view composer de los correos); los imprimibles sí lo pasan, porque el preset
+        // puede diferir por dominio.
+        $preset = self::allAsMap($tenant ?: self::DEFAULT_TENANT)['color_preset'] ?? 'blue';
 
         $map = [
             'blue'   => ['primary' => '#2563eb', 'primary_dark' => '#1d4ed8', 'header_from' => '#0f1f3d', 'header_to' => '#1e3a8a', 'btn_shadow' => 'rgba(37,99,235,.35)',   'accent_from' => '#2563eb', 'accent_to' => '#4f46e5'],

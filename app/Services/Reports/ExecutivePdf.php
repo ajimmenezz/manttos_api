@@ -60,7 +60,7 @@ class ExecutivePdf extends Pdf
         $this->y = $y + $h + 5;
 
         // Un panel por agrupación, dos por renglón.
-        $this->grid($summary['groups'] ?? [], self::NAVY, 'Total de servicios por ');
+        $this->grid($summary['groups'] ?? [], $this->brandDark, 'Total de servicios por ');
     }
 
     /** Barras del reparto por tipo de servicio, cada una con su color de sección. */

@@ -24,14 +24,23 @@ class ServiceSheetRenderer
 
     /**
      * Bytes del PDF de la hoja de servicio.
-     * `$signature`: 'end' (una firma al final), 'page' (una por hoja) o null.
+     *
+     * `$signature`: 'end' (una firma al final), 'page' (una por hoja) o null, y
+     * `$signatureAlign` dónde queda a lo ancho. `$tenant` es el dominio que pidió el
+     * documento: de él salen el logo y los colores del membrete.
      */
-    public function renderPdf(Event $event, array $branding = [], ?string $signature = null): string
-    {
+    public function renderPdf(
+        Event $event,
+        array $branding = [],
+        ?string $signature = null,
+        ?string $signatureAlign = null,
+        ?string $tenant = null,
+    ): string {
         $data = $this->buildData($event, $branding);
 
         return (new ServiceSheetPdf($data))
-            ->withSignature($signature)
+            ->withSignature($signature, $signatureAlign)
+            ->withBranding($tenant)
             ->withHeaderNote($data['folio'] ?? null)
             ->render();
     }
