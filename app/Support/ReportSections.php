@@ -40,31 +40,31 @@ class ReportSections
                 'label'    => 'Reporte de eventos',
                 'route'    => '/events/reportes',
                 'sections' => [
-                    ['key' => 'kpi.total',          'group' => 'Indicadores', 'label' => 'Eventos totales'],
-                    ['key' => 'kpi.abiertos',       'group' => 'Indicadores', 'label' => 'Abiertos'],
-                    ['key' => 'kpi.resueltos',      'group' => 'Indicadores', 'label' => 'Resueltos'],
-                    ['key' => 'kpi.avg_resolution', 'group' => 'Indicadores', 'label' => 'Días promedio de resolución'],
+                    ['key' => 'kpi.total',          'group' => 'Indicadores', 'label' => 'Eventos totales', 'pdf' => true],
+                    ['key' => 'kpi.abiertos',       'group' => 'Indicadores', 'label' => 'Abiertos', 'pdf' => true],
+                    ['key' => 'kpi.resueltos',      'group' => 'Indicadores', 'label' => 'Resueltos', 'pdf' => true],
+                    ['key' => 'kpi.avg_resolution', 'group' => 'Indicadores', 'label' => 'Días promedio de resolución', 'pdf' => true],
 
                     ['key' => 'sla.kpi.compliance', 'group' => 'Nivel de servicio (SLA)', 'label' => 'Porcentaje de cumplimiento'],
                     ['key' => 'sla.kpi.met',        'group' => 'Nivel de servicio (SLA)', 'label' => 'En tiempo'],
                     ['key' => 'sla.kpi.breached',   'group' => 'Nivel de servicio (SLA)', 'label' => 'Fuera de SLA'],
                     ['key' => 'sla.kpi.overdue',    'group' => 'Nivel de servicio (SLA)', 'label' => 'Vencidos'],
-                    ['key' => 'sla.by_tier',        'group' => 'Nivel de servicio (SLA)', 'label' => 'Cumplimiento por nivel de atención (tabla)'],
+                    ['key' => 'sla.by_tier',        'group' => 'Nivel de servicio (SLA)', 'label' => 'Cumplimiento por nivel de atención (tabla)', 'pdf' => true],
 
-                    ['key' => 'weekly',        'group' => 'Gráficas', 'label' => 'Volumen de eventos por semana', 'payload' => ['weekly']],
-                    ['key' => 'by_status',     'group' => 'Gráficas', 'label' => 'Por estado',                    'payload' => ['by_status']],
-                    ['key' => 'by_priority',   'group' => 'Gráficas', 'label' => 'Por prioridad',                 'payload' => ['by_priority']],
-                    ['key' => 'by_nature',     'group' => 'Gráficas', 'label' => 'Incidentes vs. solicitudes',    'payload' => ['by_nature']],
-                    ['key' => 'by_event_type', 'group' => 'Gráficas', 'label' => 'Por tipo de evento',            'payload' => ['by_event_type']],
-                    ['key' => 'by_impact',     'group' => 'Gráficas', 'label' => 'Por impacto',                   'payload' => ['by_impact']],
-                    ['key' => 'by_urgency',    'group' => 'Gráficas', 'label' => 'Por urgencia',                  'payload' => ['by_urgency']],
+                    ['key' => 'weekly',        'group' => 'Gráficas', 'label' => 'Volumen de eventos por semana', 'payload' => ['weekly'], 'pdf' => true],
+                    ['key' => 'by_status',     'group' => 'Gráficas', 'label' => 'Por estado',                    'payload' => ['by_status'], 'pdf' => true],
+                    ['key' => 'by_priority',   'group' => 'Gráficas', 'label' => 'Por prioridad',                 'payload' => ['by_priority'], 'pdf' => true],
+                    ['key' => 'by_nature',     'group' => 'Gráficas', 'label' => 'Incidentes vs. solicitudes',    'payload' => ['by_nature'], 'pdf' => true],
+                    ['key' => 'by_event_type', 'group' => 'Gráficas', 'label' => 'Por tipo de evento',            'payload' => ['by_event_type'], 'pdf' => true],
+                    ['key' => 'by_impact',     'group' => 'Gráficas', 'label' => 'Por impacto',                   'payload' => ['by_impact'], 'pdf' => true],
+                    ['key' => 'by_urgency',    'group' => 'Gráficas', 'label' => 'Por urgencia',                  'payload' => ['by_urgency'], 'pdf' => true],
 
                     ['key' => 'form_breakdowns',      'group' => 'KPIs dinámicos', 'label' => 'Campos del formulario', 'payload' => ['form_breakdowns', 'form_meta']],
                     ['key' => 'directory_breakdowns', 'group' => 'KPIs dinámicos', 'label' => 'Datos del directorio',  'payload' => ['directory_breakdowns', 'directory_meta']],
 
-                    ['key' => 'rank_system', 'group' => 'Tablas', 'label' => 'Ranking por sistema', 'payload' => ['by_system']],
-                    ['key' => 'rank_client', 'group' => 'Tablas', 'label' => 'Ranking por cliente', 'payload' => ['by_client']],
-                    ['key' => 'rank_site',   'group' => 'Tablas', 'label' => 'Ranking por sitio',   'payload' => ['by_site']],
+                    ['key' => 'rank_system', 'group' => 'Tablas', 'label' => 'Ranking por sistema', 'payload' => ['by_system'], 'pdf' => true],
+                    ['key' => 'rank_client', 'group' => 'Tablas', 'label' => 'Ranking por cliente', 'payload' => ['by_client'], 'pdf' => true],
+                    ['key' => 'rank_site',   'group' => 'Tablas', 'label' => 'Ranking por sitio',   'payload' => ['by_site'], 'pdf' => true],
                     ['key' => 'detail',      'group' => 'Tablas', 'label' => 'Detalle de eventos (tabla y descarga a Excel)'],
 
                     ['key' => 'plan_view',   'group' => 'Vistas', 'label' => 'Vista de plano (dispositivos con eventos)'],
@@ -74,29 +74,68 @@ class ReportSections
                 'label'    => 'Reporte de mantenimientos',
                 'route'    => '/maintenances/reportes',
                 'sections' => [
-                    ['key' => 'kpi.total',     'group' => 'Indicadores', 'label' => 'Capturas de actividad'],
-                    ['key' => 'kpi.devices',   'group' => 'Indicadores', 'label' => 'Dispositivos atendidos'],
-                    ['key' => 'kpi.engineers', 'group' => 'Indicadores', 'label' => 'Ingenieros'],
-                    ['key' => 'kpi.sites',     'group' => 'Indicadores', 'label' => 'Sitios'],
+                    ['key' => 'kpi.total',     'group' => 'Indicadores', 'label' => 'Capturas de actividad', 'pdf' => true],
+                    ['key' => 'kpi.devices',   'group' => 'Indicadores', 'label' => 'Dispositivos atendidos', 'pdf' => true],
+                    ['key' => 'kpi.engineers', 'group' => 'Indicadores', 'label' => 'Ingenieros', 'pdf' => true],
+                    ['key' => 'kpi.sites',     'group' => 'Indicadores', 'label' => 'Sitios', 'pdf' => true],
 
-                    ['key' => 'weekly',                'group' => 'Gráficas', 'label' => 'Capturas por semana',          'payload' => ['weekly']],
-                    ['key' => 'by_hour',               'group' => 'Gráficas', 'label' => 'Horarios de captura',          'payload' => ['by_hour']],
-                    ['key' => 'by_activity_type',      'group' => 'Gráficas', 'label' => 'Por tipo de actividad',        'payload' => ['by_activity_type']],
-                    ['key' => 'by_maintenance_status', 'group' => 'Gráficas', 'label' => 'Por estado del mantenimiento', 'payload' => ['by_maintenance_status']],
-                    ['key' => 'by_system',             'group' => 'Gráficas', 'label' => 'Por sistema',                  'payload' => ['by_system']],
+                    ['key' => 'weekly',                'group' => 'Gráficas', 'label' => 'Capturas por semana',          'payload' => ['weekly'], 'pdf' => true],
+                    ['key' => 'by_hour',               'group' => 'Gráficas', 'label' => 'Horarios de captura',          'payload' => ['by_hour'], 'pdf' => true],
+                    ['key' => 'by_activity_type',      'group' => 'Gráficas', 'label' => 'Por tipo de actividad',        'payload' => ['by_activity_type'], 'pdf' => true],
+                    ['key' => 'by_maintenance_status', 'group' => 'Gráficas', 'label' => 'Por estado del mantenimiento', 'payload' => ['by_maintenance_status'], 'pdf' => true],
+                    ['key' => 'by_system',             'group' => 'Gráficas', 'label' => 'Por sistema',                  'payload' => ['by_system'], 'pdf' => true],
 
                     ['key' => 'form_breakdowns',      'group' => 'KPIs dinámicos', 'label' => 'Campos del formulario', 'payload' => ['form_breakdowns']],
                     ['key' => 'directory_breakdowns', 'group' => 'KPIs dinámicos', 'label' => 'Datos del directorio',  'payload' => ['directory_breakdowns']],
 
-                    ['key' => 'rank_engineer', 'group' => 'Tablas', 'label' => 'Ranking por ingeniero', 'payload' => ['by_engineer']],
-                    ['key' => 'rank_client',   'group' => 'Tablas', 'label' => 'Ranking por cliente',   'payload' => ['by_client']],
-                    ['key' => 'rank_site',     'group' => 'Tablas', 'label' => 'Ranking por sitio',     'payload' => ['by_site']],
+                    ['key' => 'rank_engineer', 'group' => 'Tablas', 'label' => 'Ranking por ingeniero', 'payload' => ['by_engineer'], 'pdf' => true],
+                    ['key' => 'rank_client',   'group' => 'Tablas', 'label' => 'Ranking por cliente',   'payload' => ['by_client'], 'pdf' => true],
+                    ['key' => 'rank_site',     'group' => 'Tablas', 'label' => 'Ranking por sitio',     'payload' => ['by_site'], 'pdf' => true],
                     ['key' => 'detail',        'group' => 'Tablas', 'label' => 'Detalle de capturas (tabla y descarga a Excel)'],
                 ],
             ],
         ];
     }
 
+    /**
+     * Secciones que el PDF sabe dibujar y que este usuario puede ver.
+     *
+     * Alimenta el selector de «qué se imprime» del botón de descarga. La marca `pdf`
+     * vive en el catálogo —y no en una lista aparte— para que agregar una gráfica al
+     * imprimible sea un solo cambio: si no se marca, no aparece como opción y tampoco
+     * se dibuja, en vez de ofrecerse y salir en blanco.
+     *
+     * @param array $hidden llaves recortadas por rol/usuario
+     */
+    public static function printable(string $report, array $hidden = []): array
+    {
+        self::assertReport($report);
+
+        return array_values(array_map(
+            fn ($s) => ['key' => $s['key'], 'group' => $s['group'], 'label' => $s['label']],
+            array_filter(
+                self::catalog()[$report]['sections'],
+                fn ($s) => ($s['pdf'] ?? false) && ! in_array($s['key'], $hidden, true),
+            ),
+        ));
+    }
+
+    /**
+     * ¿Se imprime esta sección?
+     *
+     * Manda primero el recorte por rol/usuario —nadie imprime lo que no puede ver— y
+     * encima la selección puntual de la descarga. Sin selección se imprime todo lo
+     * visible, que es el comportamiento de siempre.
+     */
+    public static function printFilter(array $hidden, mixed $selected): callable
+    {
+        $selected = is_string($selected)
+            ? array_filter(array_map('trim', explode(',', $selected)))
+            : (is_array($selected) ? $selected : []);
+
+        return fn (string $key) => ! in_array($key, $hidden, true)
+            && ($selected === [] || in_array($key, $selected, true));
+    }
     public static function assertReport(string $report): void
     {
         abort_unless(in_array($report, self::REPORTS, true), 422, 'Reporte desconocido.');

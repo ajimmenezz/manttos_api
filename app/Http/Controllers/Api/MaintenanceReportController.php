@@ -146,6 +146,9 @@ class MaintenanceReportController extends Controller
         // impresión). Ver App\Support\ReportSections.
         $hidden = ReportSections::hiddenFor($request->user(), 'maintenances');
 
+        // Ver la nota del reporte de eventos.
+        $payload['printable_sections'] = ReportSections::printable('maintenances', $hidden);
+
         return response()->json(ReportSections::stripPayload($payload, 'maintenances', $hidden));
     }
 
@@ -159,7 +162,10 @@ class MaintenanceReportController extends Controller
 
         $payload = $this->show($request)->getData(true);
         $hidden  = $payload['hidden_sections'] ?? [];
-        $shows   = fn (string $k) => ! in_array($k, $hidden, true);
+
+        // Qué se imprime: el recorte por rol/usuario y, encima, lo que se haya elegido en
+        // el diálogo de descarga. Sin elección, todo lo visible (como siempre).
+        $shows   = ReportSections::printFilter($hidden, $request->input('sections'));
 
         $s = $payload['summary'];
         $kpis = array_values(array_filter([
@@ -192,22 +198,8 @@ class MaintenanceReportController extends Controller
         if ($shows('rank_client'))           $blocks[] = $bars('Ranking por cliente', $payload['by_client'], 'name');
         if ($shows('rank_site'))             $blocks[] = $bars('Ranking por sitio', $payload['by_site'], 'name');
 
-        if ($shows('detail')) {
-            $detail = $this->reportList($request->merge(['per_page' => 200, 'page' => 1]))->getData(true);
-            $cols   = array_slice($detail['columns'], 0, 7);
-            $w      = 190 / max(1, count($cols));
-
-            $blocks[] = [
-                'type'  => 'table',
-                'title' => 'Detalle de capturas (' . number_format($detail['pagination']['total'], 0, ',', '.') . ')',
-                'cols'  => array_map(fn ($c) => ['label' => $c['header'], 'w' => $w], $cols),
-                'rows'  => array_map(
-                    fn ($row) => array_map(fn ($c) => (string) ($row[$c['key']] ?? ''), $cols),
-                    $detail['rows'],
-                ),
-                'size'  => 6.5,
-            ];
-        }
+        // El listado de capturas NO va al PDF (ver la nota del reporte de eventos): para
+        // el registro uno por uno están el Excel y la bitácora.
 
         $from = $request->input('date_from');
         $to   = $request->input('date_to');
@@ -226,7 +218,9 @@ class MaintenanceReportController extends Controller
             ->withBranding(\App\Support\Tenant::fromRequest($request))
             ->render();
 
-        return response()->streamDownload(fn () => print($binary), 'reporte-de-mantenimientos.pdf', [
+        $name = \App\Support\PrintableName::build('Reporte Mantenimientos', null, $request->input('date_from'), $request->input('date_to'));
+
+        return response()->streamDownload(fn () => print($binary), $name, [
             'Content-Type' => 'application/pdf',
         ]);
     }
