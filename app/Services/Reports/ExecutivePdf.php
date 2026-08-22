@@ -35,7 +35,10 @@ class ExecutivePdf extends Pdf
             $this->Cell(self::CONTENT_W, 6, $this->t('No hay servicios registrados en el periodo seleccionado.'), 0, 0, 'C');
         }
 
-        if ($this->signature) $this->signatureBlock();
+        // OJO: `=== 'end'`, no sólo `$this->signature`. Con 'page' la firma ya la pone
+        // el pie de cada hoja, y este bloque añadía una segunda al final —flotando en
+        // una página casi vacía—. El resto de imprimibles siempre lo tuvo así.
+        if ($this->signature === 'end') $this->signatureBlock();
 
         return $this->Output('S');
     }

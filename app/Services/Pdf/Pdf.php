@@ -33,6 +33,19 @@ abstract class Pdf extends FPDF
     protected const KPI_H   = 24;
     protected const BOTTOM  = 283;        // último milímetro utilizable (arriba del pie)
 
+    /** Distancia del borde inferior a la línea de firma que va en CADA hoja. */
+    protected const SIGN_UP = 22;
+
+    /**
+     * Franja que el contenido le cede a esa firma.
+     *
+     * Sin esto, el contenido llegaba hasta BOTTOM (283) y la firma se dibujaba en 275:
+     * compartían los mismos milímetros y la línea quedaba pegada —o encima— del último
+     * panel. La reserva empuja ese panel a la hoja siguiente, que es justo lo que hace
+     * falta para poder firmar.
+     */
+    protected const SIGN_RESERVE = 16;
+
     protected const NAVY   = [30, 58, 95];
     protected const INK    = [51, 65, 85];
     protected const MUTED  = [120, 133, 150];
@@ -289,7 +302,7 @@ abstract class Pdf extends FPDF
         if ($this->signature === 'page') {
             $w = 90;
             $x = $this->signatureX($w);
-            $y = $this->h - 22;
+            $y = $this->h - self::SIGN_UP;
 
             $this->draw(self::INK);
             $this->SetLineWidth(0.3);
@@ -318,7 +331,19 @@ abstract class Pdf extends FPDF
     protected function ensureSpace(float $height): void
     {
         if ($this->PageNo() === 0) { $this->AddPage(); return; }
-        if ($this->y + $height > self::BOTTOM) $this->AddPage();
+        if ($this->y + $height > $this->bottomLimit()) $this->AddPage();
+    }
+
+    /**
+     * Último milímetro que puede ocupar el contenido en esta hoja.
+     *
+     * Con firma en cada hoja hay menos: esa línea se dibuja en el pie de TODAS las
+     * páginas, así que el espacio no es negociable. Con firma sólo al final —o sin
+     * firma— la hoja se aprovecha entera; el bloque final ya pide su propio hueco.
+     */
+    protected function bottomLimit(): float
+    {
+        return self::BOTTOM - ($this->signature === 'page' ? self::SIGN_RESERVE : 0);
     }
 
     /** Título de banda: la separación entre secciones del tablero. */
@@ -642,7 +667,7 @@ abstract class Pdf extends FPDF
             }
             $rowH = max(5.5, $lines * 4 + 1.5);
 
-            if ($this->y + $rowH > self::BOTTOM) {
+            if ($this->y + $rowH > $this->bottomLimit()) {
                 $this->AddPage();
                 $header();
             }
