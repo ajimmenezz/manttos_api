@@ -7,6 +7,7 @@ use App\Jobs\GenerateSnapshot;
 use App\Models\SnapshotExport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\URL;
