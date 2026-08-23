@@ -346,11 +346,61 @@ class SnapshotController extends Controller
             dirname(PHP_BINARY, 2) . DIRECTORY_SEPARATOR . 'bin' . DIRECTORY_SEPARATOR . $exe,
         ];
 
+        // Candidato que NO se puede comprobar por open_basedir. No se descarta: la
+        // restricción limita las funciones de archivo de PHP, NO ejecutar el binario.
+        // En Plesk el bueno (/opt/plesk/php/8.2/bin/php) cae justo aquí, y caer al
+        // `php` del PATH sería peor (suele ser el shim de phpenv, que falla).
+        $unverifiable = null;
+
         foreach ($candidates as $candidate) {
-            if (is_file($candidate)) return $candidate;
+            if (! self::withinOpenBasedir($candidate)) {
+                $unverifiable ??= $candidate;
+                continue;
+            }
+            if (self::fileExists($candidate)) return $candidate;
         }
 
-        return 'php';
+        return $unverifiable ?? 'php';
+    }
+
+    /**
+     * ¿La ruta está dentro de open_basedir? Se pregunta ANTES de tocar el disco: bajo
+     * Plesk, `is_file()` sobre una ruta de fuera emite un warning que Laravel convierte
+     * en ErrorException y tumba la petición entera — así se caía `GET /snapshots` con
+     * 500, y la pantalla lo mostraba como «todavía no hay respaldos».
+     */
+    private static function withinOpenBasedir(string $path): bool
+    {
+        return self::pathAllowedBy($path, (string) ini_get('open_basedir'));
+    }
+
+    /**
+     * El parseo, separado de la lectura de la ini para poder probarlo: `open_basedir`
+     * sólo se puede RESTRINGIR en caliente (nunca ampliar), así que no hay forma de
+     * simular varios escenarios con ini_set. El separador es parámetro por lo mismo:
+     * es ':' en Linux y ';' en Windows, y las pruebas corren en Windows.
+     */
+    private static function pathAllowedBy(string $path, string $base, string $separator = PATH_SEPARATOR): bool
+    {
+        $base = trim($base);
+        if ($base === '') return true;   // sin restricción: todo es comprobable
+
+        foreach (explode($separator, $base) as $allowed) {
+            $allowed = rtrim(trim($allowed), '/' . DIRECTORY_SEPARATOR);
+            if ($allowed !== '' && str_starts_with($path, $allowed)) return true;
+        }
+
+        return false;
+    }
+
+    /** `is_file()` que no puede tumbar la petición (mismo criterio que UsesPostgresBinaries). */
+    private static function fileExists(string $path): bool
+    {
+        try {
+            return @is_file($path);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /** DELETE /snapshots/{name} */
