@@ -31,6 +31,9 @@ use Illuminate\Support\Str;
 class AdistImportService
 {
     /** Normaliza un código/DID: mayúsculas, sin separadores, sin ceros a la izquierda por grupo de dígitos. */
+    /** Tipos de campo que aceptan texto libre: la descripción de ADIST cabe en cualquiera. */
+    public const TEXT_TYPES = ['text', 'textarea'];
+
     public function nz(?string $s): string
     {
         $s = strtoupper(trim((string) $s));
@@ -67,7 +70,11 @@ class AdistImportService
             ->orderBy('sort_order')->orderBy('id')
             ->get();
 
-        $descKey = optional($fields->firstWhere('field_type', 'text'))->field_key;
+        // Texto corto y largo sirven igual para la descripcion: `coerceValue()` ya los
+        // trata como uno solo. Mirar solo 'text' dejaba fuera formularios cuya
+        // descripcion es 'textarea' (Videovigilancia) y la importacion avisaba que el
+        // tipo de actividad «no tiene campo de texto» teniendolo.
+        $descKey = optional($fields->first(fn ($f) => in_array($f->field_type, self::TEXT_TYPES, true)))->field_key;
         $imgKeys = $fields->where('field_type', 'image')->pluck('field_key')->values()->all();
 
         $maintenance->loadMissing('site');
@@ -334,11 +341,11 @@ class AdistImportService
         })->values()->all();
     }
 
-    /** Mapa por defecto (reproduce el comportamiento histórico): primer campo `text` ← Descripción. */
+    /** Mapa por defecto: primer campo de texto (corto o largo) ← Descripción. */
     public function defaultMap(array $destFields): array
     {
         foreach ($destFields as $f) {
-            if ($f['field_type'] === 'text') {
+            if (in_array($f['field_type'], self::TEXT_TYPES, true)) {
                 return [$f['field_key'] => 'description'];
             }
         }
@@ -661,6 +668,9 @@ class AdistImportService
         $imported = MaintenanceActivity::whereIn('source_ref', array_map(fn ($id) => 'adist3:'.$id, $taskIds))
             ->pluck('source_ref')->map(fn ($r) => (int) Str::after($r, 'adist3:'))->flip()->all();
 
+        // El indice se arma UNA vez para todas las tareas (antes: una consulta por tarea).
+        $index = $this->buildSearchIndex($ctx['devices']);
+
         $out = [];
         $matched = 0;
         $unmatched = 0;
@@ -679,9 +689,10 @@ class AdistImportService
                 $deviceId = $ctx['byDid'][$key][0];
                 $matched++;
             } else {
-                $text = $t->Title.' '.strip_tags((string) $t->Description);
-                $candidates = collect($this->candidates($maintenance, $this->typePattern($text), $this->rooms($text)))
-                    ->pluck('id')->map(fn ($x) => (int) $x)->all();
+                // Se suma `device` (el tipo que declara ADIST) al texto: aporta palabras
+                // que casan con el tipo del directorio cuando el titulo es escueto.
+                $text = $t->Title.' '.$t->device.' '.strip_tags((string) $t->Description);
+                $candidates = array_column($this->rankCandidates($index, $text), 'id');
                 $unmatched++;
             }
 
@@ -1147,46 +1158,80 @@ class AdistImportService
         return array_values(array_unique($rooms));
     }
 
-    /** Candidatos de nuestro directorio por tipo + cuarto (rankeados). Devuelve stdClass{id,did,tipo,loc,area}. */
-    public function candidates(Maintenance $m, ?string $typePattern, array $rooms): array
+    /**
+     * Indice de busqueda de los dispositivos del directorio, construido UNA sola vez
+     * por importacion (antes se consultaba la base dentro del bucle: 101 tareas = 101
+     * consultas).
+     *
+     * Cada dispositivo se reduce a su conjunto de palabras y cada palabra recibe un peso
+     * IDF: cuanto en mas dispositivos aparece, menos vale. Asi "CAMARA" o "HIKVISION",
+     * que estan en todos, pesan casi cero **sin listas negras** — que es lo que hacia
+     * imposible reusar el motor anterior fuera de la plantilla de incendios.
+     *
+     * @return array{docs: array<int,array<string,bool>>, idf: array<string,float>}
+     */
+    public function buildSearchIndex(\Illuminate\Support\Collection $devices): array
     {
-        $base = fn () => DB::table('devices as d')
-            ->join('directories as dir', 'dir.id', '=', 'd.directory_id')
-            ->where('dir.site_id', $m->site_id)->where('dir.catalog_id', $m->catalog_id)->whereNull('d.archived_at')
-            ->select('d.id',
-                DB::raw("d.custom_fields->>'did' as did"),
-                DB::raw("d.custom_fields->>'tipo_dispositivo' as tipo"),
-                DB::raw("d.custom_fields->>'dir_incendio_location' as loc"),
-                DB::raw("d.custom_fields->>'dir_incendio_area' as area"));
+        $docs = [];
+        $df   = [];
 
-        $roomWhere = function ($q) use ($rooms) {
-            $q->where(function ($w) use ($rooms) {
-                foreach ($rooms as $r) {
-                    $w->orWhereRaw("UPPER(d.custom_fields->>'dir_incendio_location') LIKE ?", ['%'.strtoupper($r).'%'])
-                      ->orWhereRaw("UPPER(d.custom_fields->>'dir_incendio_area') LIKE ?", ['%'.strtoupper($r).'%']);
-                }
-            });
-        };
-
-        // 1) tipo + cuarto
-        if ($typePattern && $rooms) {
-            $r = $base()->whereRaw("UPPER(d.custom_fields->>'tipo_dispositivo') LIKE ?", [$typePattern])->where($roomWhere)->limit(3)->get();
-            if ($r->count()) {
-                return $r->all();
+        foreach ($devices as $d) {
+            $tokens = array_fill_keys($this->tokenize((string) $d->search), true);
+            $docs[(int) $d->id] = $tokens;
+            foreach (array_keys($tokens) as $t) {
+                $df[$t] = ($df[$t] ?? 0) + 1;
             }
         }
-        // 2) solo cuarto
-        if ($rooms) {
-            $r = $base()->where($roomWhere)->limit(3)->get();
-            if ($r->count()) {
-                return $r->all();
-            }
-        }
-        // 3) solo tipo
-        if ($typePattern) {
-            return $base()->whereRaw("UPPER(d.custom_fields->>'tipo_dispositivo') LIKE ?", [$typePattern])->limit(3)->get()->all();
+
+        $n = max(1, count($docs));
+        $idf = [];
+        foreach ($df as $t => $c) {
+            $idf[$t] = log(1 + $n / $c);
         }
 
-        return [];
+        return compact('docs', 'idf');
+    }
+
+    /**
+     * Los N dispositivos mas parecidos al texto de la tarea.
+     *
+     * @return array<int,array{id:int, score:float, shared:array<int,string>}>
+     */
+    public function rankCandidates(array $index, string $taskText, int $limit = 5): array
+    {
+        $tokens = array_unique($this->tokenize($taskText));
+        if (! $tokens) return [];
+
+        $scored = [];
+        foreach ($index['docs'] as $id => $doc) {
+            $score = 0.0;
+            $shared = [];
+            foreach ($tokens as $t) {
+                if (! isset($doc[$t])) continue;
+                $w = $index['idf'][$t] ?? 0;
+                // Una palabra larga con digitos parece identificador (serie, modelo, IP):
+                // cuando coincide, es MUCHO mas informativa que una palabra comun.
+                if (strlen($t) >= 6 && preg_match('/\d/', $t)) $w *= 3;
+                $score += $w;
+                $shared[] = $t;
+            }
+            if ($score > 0) $scored[] = ['id' => (int) $id, 'score' => round($score, 3), 'shared' => $shared];
+        }
+
+        usort($scored, fn ($a, $b) => $b['score'] <=> $a['score'] ?: $a['id'] <=> $b['id']);
+
+        return array_slice($scored, 0, $limit);
+    }
+
+    /** Palabras normalizadas (sin acentos, mayusculas, sin ruido de 1-2 letras). */
+    public function tokenize(string $text): array
+    {
+        $t = strtoupper(strtr($text, [
+            'Á'=>'A','É'=>'E','Í'=>'I','Ó'=>'O','Ú'=>'U','Ü'=>'U','Ñ'=>'N',
+            'á'=>'A','é'=>'E','í'=>'I','ó'=>'O','ú'=>'U','ü'=>'U','ñ'=>'N',
+        ]));
+        $parts = preg_split('/[^A-Z0-9]+/', $t, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return array_values(array_filter($parts, fn ($p) => strlen($p) >= 3));
     }
 }
