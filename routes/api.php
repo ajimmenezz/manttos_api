@@ -258,6 +258,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/developer/imports/adist/preview', [AdistImportController::class, 'preview']);
     Route::post('/developer/imports/adist/task',    [AdistImportController::class, 'task']);
     Route::post('/developer/imports/adist/commit',  [AdistImportController::class, 'commit']);
+    Route::post('/developer/imports/adist/ai-match', [AdistImportController::class, 'aiMatch']);
 
     // Permisos
     Route::get('/permissions', [PermissionController::class, 'index']);

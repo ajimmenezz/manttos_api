@@ -160,6 +160,62 @@ class AdistImportController extends Controller
     }
 
     /** Analiza un IdRequest de ADIST contra un mantenimiento destino (no escribe nada). */
+    /**
+     * POST /developer/imports/adist/ai-match — sugiere el dispositivo de cada tarea.
+     *
+     * Sugiere: NO asocia. La respuesta alimenta la pantalla, que pide confirmacion. El
+     * emparejamiento por texto ya viene en el preview; esto resuelve el tramo donde el
+     * texto se queda corto (nombres parecidos que son lugares distintos).
+     */
+    public function aiMatch(Request $request, \App\Services\Ai\AdistDeviceMatcher $matcher): JsonResponse
+    {
+        $this->authorizeImport($request);
+
+        $data = $request->validate([
+            'maintenance_id' => ['required', 'integer', 'exists:maintenances,id'],
+            'request_id'     => ['required'],
+            'type'           => ['required', 'string', 'max:60'],
+            'task_ids'       => ['nullable', 'array', 'max:200'],
+            'task_ids.*'     => ['integer'],
+        ]);
+
+        if (! $matcher->isOperational()) {
+            return response()->json(['message' => 'La asistencia con IA no esta configurada en este servidor.'], 422);
+        }
+
+        try {
+            $maintenance = \App\Models\Maintenance::findOrFail($data['maintenance_id']);
+            $ctx   = $this->service->resolveContext($maintenance, $data['type']);
+            $index = $this->service->buildSearchIndex($ctx['devices']);
+            $label = $ctx['devices']->keyBy('id');
+
+            $only = ! empty($data['task_ids']) ? array_flip($data['task_ids']) : null;
+
+            $items = [];
+            foreach ($this->service->fetchTasks($data['request_id'], $data['type']) as $t) {
+                $id = (int) $t->Id;
+                if ($only !== null && ! isset($only[$id])) continue;
+
+                $text = $t->Title.' '.$t->device.' '.strip_tags((string) $t->Description);
+                $cands = $this->service->rankCandidates($index, $text, 5);
+                if (! $cands) continue;
+
+                $items[] = [
+                    'task_id'    => $id,
+                    'text'       => $text,
+                    'candidates' => array_map(fn ($c) => [
+                        'id'    => $c['id'],
+                        'label' => (string) (optional($label->get($c['id']))->did ?: optional($label->get($c['id']))->loc),
+                    ], $cands),
+                ];
+            }
+
+            return response()->json(['suggestions' => $matcher->suggest($items)]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
     public function preview(Request $request): JsonResponse
     {
         $this->authorizeImport($request);
