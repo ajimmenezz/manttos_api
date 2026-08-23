@@ -289,6 +289,7 @@ class DeviceImportExportController extends Controller
         $created = 0;
         $updated = 0;
         $skipped = 0;
+        $restored = 0;   // archivados que vuelven porque el layout los sigue trayendo
 
         DB::transaction(function () use ($cached, $directory, $request, &$created, &$updated, &$skipped) {
             foreach ($cached['rows'] as $rowData) {
@@ -304,6 +305,19 @@ class DeviceImportExportController extends Controller
                 if ($rowData['id']) {
                     $device = Device::find($rowData['id']);
                     if ($device) {
+                        // Traer un ID en el layout es afirmar que el equipo SIGUE ahi, asi
+                        // que se desarchiva. Es lo que permite el flujo «vaciar el
+                        // directorio y subir el layout»: lo que reaparece revive y lo que
+                        // ya no viene se queda archivado como baja, sin borrar nada ni
+                        // perder las actividades y eventos que cuelgan de ese dispositivo.
+                        // `archived_at` NO es fillable a proposito (para que nadie lo
+                        // mueva por asignacion masiva desde una peticion), asi que se
+                        // asigna directo; el save() de update() lo persiste igual.
+                        if ($device->archived_at !== null) {
+                            $device->archived_at = null;
+                            $restored++;
+                        }
+
                         $device->update([
                             'name'          => $displayName,
                             'device_type'   => $deviceType,
@@ -331,10 +345,12 @@ class DeviceImportExportController extends Controller
 
         return response()->json([
             'message' => "Importación completada: {$created} creados, {$updated} actualizados" .
+                ($restored > 0 ? ", {$restored} reactivados" : '') .
                 ($skipped > 0 ? ", {$skipped} omitidos por errores" : '') . '.',
-            'created' => $created,
-            'updated' => $updated,
-            'skipped' => $skipped,
+            'created'  => $created,
+            'updated'  => $updated,
+            'restored' => $restored,
+            'skipped'  => $skipped,
         ]);
     }
 
