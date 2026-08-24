@@ -291,7 +291,7 @@ class DeviceImportExportController extends Controller
         $skipped = 0;
         $restored = 0;   // archivados que vuelven porque el layout los sigue trayendo
 
-        DB::transaction(function () use ($cached, $directory, $request, &$created, &$updated, &$skipped) {
+        DB::transaction(function () use ($cached, $directory, $request, &$created, &$updated, &$skipped, &$restored) {
             foreach ($cached['rows'] as $rowData) {
                 if ($rowData['has_errors']) {
                     $skipped++;
