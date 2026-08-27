@@ -10,3 +10,6 @@ Artisan::command('inspire', function () {
 
 // Retención de la Auditoría: conservar solo los últimos 90 días.
 Schedule::command('activity:prune')->dailyAt('03:15');
+
+// Misma retención para la bitácora de errores de la app móvil.
+Schedule::command('app-errors:prune')->dailyAt('03:20');

@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\DeviceChangeRequestController;
 use App\Http\Controllers\Api\DirectoryAnalyzerController;
 use App\Http\Controllers\Api\DirectoryController;
 use App\Http\Controllers\Api\EventCommentController;
+use App\Http\Controllers\Api\AppErrorLogController;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
 use App\Http\Controllers\Api\ServiceSheetExportController;
@@ -110,6 +111,12 @@ Route::get('/snapshots/{name}/file', [SnapshotController::class, 'file'])
 Route::get('/snapshots/import-progress', [SnapshotController::class, 'importProgress'])
     ->middleware('signed')
     ->name('snapshots.import-progress');
+
+// Errores de la app móvil. FUERA de auth:sanctum a propósito: el error que más
+// urge capturar es el que ocurre sin sesión (o cuando se perdió), que es justo
+// cuando el usuario no puede reportar nada. Si viene token se atribuye al usuario.
+// Con throttle y todos los campos acotados en el controlador.
+Route::post('/app-errors', [AppErrorLogController::class, 'store'])->middleware('throttle:30,1');
 
 // Rutas protegidas
 Route::middleware('auth:sanctum')->group(function () {
@@ -216,6 +223,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Auditoría del sistema (sensible; gateada por audit.view / superadmin).
     Route::get('/audit',         [AuditController::class, 'index']);
     Route::get('/audit/filters', [AuditController::class, 'filters']);
+
+    // Errores de la app móvil (lectura y seguimiento). Estáticas antes del wildcard.
+    Route::get('/app-errors',            [AppErrorLogController::class, 'index']);
+    Route::get('/app-errors/filters',    [AppErrorLogController::class, 'filters']);
+    Route::post('/app-errors/resolve',   [AppErrorLogController::class, 'resolve']);
+    Route::get('/app-errors/{appError}', [AppErrorLogController::class, 'show']);
 
     // Suplantación de usuario (solo superadmin, web). Estáticas antes del wildcard {user}.
     Route::get('/impersonate/users', [ImpersonationController::class, 'users']);
