@@ -1022,6 +1022,8 @@ class EventController extends Controller
             'system_id'   => 'required|exists:catalogs,id',
             'search'      => 'nullable|string|max:100',
             'dir_filters' => 'nullable', // filtros por campo del directorio (JSON o array)
+            'page'        => 'nullable|integer|min:1',
+            'per_page'    => 'nullable|integer|min:1|max:100',
         ]);
 
         $site = Site::findOrFail($data['site_id']);
@@ -1041,17 +1043,34 @@ class EventController extends Controller
             $this->applyDirectoryFilters($q, $dirFilters, $meta['modes']);
         }
 
+        // Búsqueda libre sobre TODOS los campos del directorio: nombre, ubicación,
+        // tipo y cualquier valor de `custom_fields` (incluido el DID). Cada palabra
+        // debe aparecer en algún campo, no necesariamente en el mismo, para que
+        // "bomba recepcion" encuentre la bomba ubicada en recepción.
         $search = trim((string) ($data['search'] ?? ''));
-        if ($search !== '') {
+        foreach (preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $term) {
+            $like = '%' . $term . '%';
             $q->where(fn ($w) => $w
-                ->where('name', 'ilike', "%{$search}%")
-                ->orWhere('location', 'ilike', "%{$search}%")
-                ->orWhereRaw('custom_fields->>? ilike ?', [$didKey, "%{$search}%"]));
+                ->where('name', 'ilike', $like)
+                ->orWhere('location', 'ilike', $like)
+                ->orWhere('device_type', 'ilike', $like)
+                // El CASE evita el error de jsonb_each_text si algún dispositivo
+                // guardó `custom_fields` como arreglo o escalar en vez de objeto.
+                ->orWhereRaw(
+                    "EXISTS (SELECT 1 FROM jsonb_each_text(CASE WHEN jsonb_typeof(devices.custom_fields) = 'object'
+                        THEN devices.custom_fields ELSE '{}'::jsonb END) AS kv WHERE kv.value ILIKE ?)",
+                    [$like],
+                ));
         }
 
+        // Paginado para el scroll infinito del móvil; sin `page` se comporta igual
+        // que antes (primeros 30 + bandera de truncado que usa la web).
         $total   = (clone $q)->count();
-        $limit   = 30;
-        $devices = $q->orderBy('name')->limit($limit)->get(['id', 'name', 'device_type', 'location', 'custom_fields']);
+        $limit   = (int) ($data['per_page'] ?? 30);
+        $page    = (int) ($data['page'] ?? 1);
+        $devices = $q->orderBy('name')->orderBy('id')
+            ->forPage($page, $limit)
+            ->get(['id', 'name', 'device_type', 'location', 'custom_fields']);
 
         return response()->json([
             'devices' => $devices->map(fn ($d) => [
@@ -1063,8 +1082,11 @@ class EventController extends Controller
                 'custom_fields' => is_array($d->custom_fields) ? $d->custom_fields : (object) [],
             ])->values(),
             'total'     => $total,
+            'page'      => $page,
+            'per_page'  => $limit,
             'limit'     => $limit,
-            'truncated' => $total > $limit,
+            'has_more'  => ($page * $limit) < $total,
+            'truncated' => $total > ($page * $limit),
         ]);
     }
 
