@@ -61,6 +61,7 @@ class AppSettingController extends Controller
     private function normalizeFlags(array $map): array
     {
         $map['allow_execution_date'] = ($map['allow_execution_date'] ?? '0') === '1';
+        $map['allow_gallery_photos'] = ($map['allow_gallery_photos'] ?? '0') === '1';
         return $map;
     }
 
@@ -107,6 +108,7 @@ class AppSettingController extends Controller
             'pdf_footer.columns.*.text' => 'nullable|string|max:600',
             'pdf_footer.columns.*.align' => 'nullable|in:L,C,R',
             'allow_execution_date' => 'sometimes|boolean',
+            'allow_gallery_photos' => 'sometimes|boolean',
             'smtp_host'       => 'sometimes|nullable|string|max:255',
             'smtp_port'       => 'sometimes|nullable|integer|min:1|max:65535',
             'smtp_encryption' => 'sometimes|nullable|string|in:tls,ssl,none',
@@ -129,7 +131,7 @@ class AppSettingController extends Controller
 
             $stored = match (true) {
                 $key === 'theme', $key === 'pdf_footer' => ($value !== null ? json_encode($value) : null),
-                $key === 'allow_execution_date' => ($value ? '1' : '0'),
+                $key === 'allow_execution_date', $key === 'allow_gallery_photos' => ($value ? '1' : '0'),
                 default                         => ($value !== null ? (string) $value : null),
             };
 

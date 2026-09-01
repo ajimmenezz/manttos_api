@@ -16,7 +16,7 @@ class AppSetting extends Model
 
     public const DEFAULT_TENANT = 'default';
 
-    public const ALLOWED_KEYS = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme', 'allow_execution_date'];
+    public const ALLOWED_KEYS = ['app_name', 'logo_url', 'login_bg_url', 'color_preset', 'theme', 'allow_execution_date', 'allow_gallery_photos'];
 
     /**
      * ¿Está permitido capturar manualmente la fecha de ejecución de actividades
@@ -26,6 +26,21 @@ class AppSetting extends Model
     public static function executionDateAllowed(): bool
     {
         $v = self::allAsMap()['allow_execution_date'] ?? null;
+        return $v === '1' || $v === 'true' || $v === true || $v === 1;
+    }
+
+    /**
+     * ¿Está permitido llenar los campos de foto de la app móvil eligiendo una
+     * imagen de la galería, además de tomarla con la cámara? Apagado por
+     * defecto: la regla de origen es que la evidencia se toma en el momento.
+     *
+     * Las fotos que entran por galería NO llevan marca de agua ni sello de
+     * ubicación: no se tomaron en el momento, así que estamparles hora y
+     * coordenadas sería afirmar algo que no consta.
+     */
+    public static function galleryPhotosAllowed(): bool
+    {
+        $v = self::allAsMap()['allow_gallery_photos'] ?? null;
         return $v === '1' || $v === 'true' || $v === true || $v === 1;
     }
 
