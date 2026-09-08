@@ -172,7 +172,7 @@ class RunEventAutomation implements ShouldQueue
                 $event->update(['status_id' => $status->id]);
                 EventStatusHistory::create([
                     'event_id' => $event->id, 'from_status_id' => $from, 'to_status_id' => $status->id,
-                    'user_id' => $this->actorId, 'note' => $cfg['note'] ?? 'Cambio automático (automatización).',
+                    'user_id' => $this->actorId, 'note' => self::noteAsText($cfg['note'] ?? null),
                     'created_at' => now(),
                 ]);
                 return ['status' => 'done', 'to' => $status->key];
@@ -345,4 +345,22 @@ class RunEventAutomation implements ShouldQueue
             '{prioridad}'   => (string) $event->priority,
         ]);
     }
+    /**
+     * La nota del cambio de estado sale de la configuración de la automatización.
+     * Si ahí quedó guardado algo que no es texto —un objeto, por ejemplo— se
+     * escribía tal cual en el historial, y el detalle del evento (app y panel)
+     * reventaba al intentar pintarlo. Aquí se garantiza que SIEMPRE sea texto.
+     */
+    private static function noteAsText(mixed $note): string
+    {
+        if (is_string($note) && trim($note) !== '') {
+            return $note;
+        }
+        if (is_scalar($note)) {
+            return (string) $note;
+        }
+
+        return 'Cambio automático (automatización).';
+    }
+
 }
