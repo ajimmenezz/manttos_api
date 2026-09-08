@@ -123,13 +123,25 @@ class MaintenanceActivityController extends Controller
     }
 
     /** GET /maintenances/{maintenance}/activity-counts
-     *  Conteo de actividades por (device_id → activity_type_id) — carga lazy
+     *  Conteo de actividades por (device_id → activity_type_id) — carga lazy.
+     *
+     *  Acepta un rango opcional por FECHA DE EJECUCIÓN (`performed_at`, la misma que
+     *  usa la bitácora): `?date_from=Y-m-d&date_to=Y-m-d`. Sirve para responder
+     *  «qué dispositivos recibieron servicio en estas fechas» sin endpoint aparte:
+     *  el frontend pide los conteos acotados y se queda con los que traen algo.
      */
-    public function activityCounts(Maintenance $maintenance): JsonResponse
+    public function activityCounts(Request $request, Maintenance $maintenance): JsonResponse
     {
         $this->authorizeAccess($maintenance);
 
+        $filters = $request->validate([
+            'date_from' => 'nullable|date',
+            'date_to'   => 'nullable|date',
+        ]);
+
         $rows = MaintenanceActivity::where('maintenance_id', $maintenance->id)
+            ->when($filters['date_from'] ?? null, fn ($q, $d) => $q->whereDate('performed_at', '>=', $d))
+            ->when($filters['date_to']   ?? null, fn ($q, $d) => $q->whereDate('performed_at', '<=', $d))
             ->select('device_id', 'activity_type_id', DB::raw('count(*) as cnt'))
             ->groupBy('device_id', 'activity_type_id')
             ->get();
