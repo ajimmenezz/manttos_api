@@ -13,12 +13,16 @@ use App\Models\DeviceToken;
  * FCM HTTP v1 y iOS saldrá por APNs directo. El Job no tiene por qué enterarse: pide
  * "manda esto a estos tokens" y aquí se reparte por `provider`.
  *
- * @see FcmSender   Android
- * @see ApnsSender  iOS
+ * La PWA (versión web, la que usan los iPhone sin App Store) va por Web Push
+ * estándar con llaves VAPID: su "token" es la suscripción del navegador.
+ *
+ * @see FcmSender      Android
+ * @see ApnsSender     iOS (app nativa)
+ * @see WebPushSender  PWA
  */
 class PushSender
 {
-    public function __construct(private FcmSender $fcm, private ApnsSender $apns)
+    public function __construct(private FcmSender $fcm, private ApnsSender $apns, private WebPushSender $webpush)
     {
     }
 
@@ -48,6 +52,12 @@ class PushSender
             ));
         }
 
+        if ($webTokens = $byProvider->get('webpush')) {
+            $dead = array_merge($dead, $this->webpush->send(
+                $webTokens->pluck('token')->all(), $title, $body, $data
+            ));
+        }
+
         return $dead;
     }
 
@@ -57,6 +67,6 @@ class PushSender
      */
     public function isConfigured(): bool
     {
-        return $this->fcm->isConfigured() || $this->apns->isConfigured();
+        return $this->fcm->isConfigured() || $this->apns->isConfigured() || $this->webpush->isConfigured();
     }
 }

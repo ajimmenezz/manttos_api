@@ -19,9 +19,10 @@ class DeviceTokenController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'token'       => ['required', 'string', 'max:500'],
+            // La PWA manda la suscripción de Web Push completa en JSON (~300-450 caracteres).
+            'token'       => ['required', 'string', 'max:1000'],
             'platform'    => ['required', 'in:' . implode(',', DeviceToken::PLATFORMS)],
-            'provider'    => ['nullable', 'in:fcm,apns'],
+            'provider'    => ['nullable', 'in:fcm,apns,webpush'],
             'app_version' => ['nullable', 'string', 'max:20'],
             'device_name' => ['nullable', 'string', 'max:120'],
         ]);
@@ -29,6 +30,16 @@ class DeviceTokenController extends Controller
         DeviceToken::register($request->user(), $data['token'], $data['platform'], $data);
 
         return response()->json(['message' => 'Dispositivo registrado.']);
+    }
+
+    /**
+     * Llave pública VAPID para que la PWA se suscriba al push web. Se sirve desde
+     * aquí (y no incrustada en la compilación) para poder rotarla sin recompilar.
+     * `key: null` = el servidor no tiene push web configurado; la PWA lo dice así.
+     */
+    public function webKey(): JsonResponse
+    {
+        return response()->json(['key' => config('webpush.public_key') ?: null]);
     }
 
     /**

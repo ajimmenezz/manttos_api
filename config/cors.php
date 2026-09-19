@@ -19,7 +19,13 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['http://localhost:3000', 'https://mantenimientos.siccobsolutions.com.mx'],
+    // movil.… = la versión web de la app (PWA para iPhone), que llama al API desde
+    // su propio dominio. Otro cliente con marca propia necesitaría su renglón aquí.
+    'allowed_origins' => [
+        'http://localhost:3000',
+        'https://mantenimientos.siccobsolutions.com.mx',
+        'https://movil.mantenimientos.siccobsolutions.com.mx',
+    ],
 
     // Desarrollo local: cualquier puerto de localhost/127.0.0.1 (Next puede arrancar en 3001, etc.)
     'allowed_origins_patterns' => ['#^http://(localhost|127\.0\.0\.1)(:\d+)?$#'],

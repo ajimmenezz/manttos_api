@@ -3,7 +3,7 @@
 > **Este archivo se GENERA.** No lo edite a mano: se sobrescribe.
 > `php artisan manttos:inventario`
 >
-> Generado el 2026-09-08 05:18
+> Generado el 2026-09-19 03:52
 > Contra `mantenimientos` en `local`.
 
 Los **hechos** salen del router y del esquema, así que no pueden mentir. El
@@ -17,12 +17,12 @@ contra un ambiente atrasado, dirá lo de ese ambiente.
 
 | | |
 |---|---:|
-| Rutas de API | **481** |
-| — con guarda declarada | **481** |
+| Rutas de API | **482** |
+| — con guarda declarada | **482** |
 | — sin guarda declarada | **0** |
 | Tablas (`mantenimientos`) | **87** |
-| Migraciones | **121** |
-| Comandos propios | **11** |
+| Migraciones | **122** |
+| Comandos propios | **12** |
 | Modelos | **69** |
 
 > «Sin guarda declarada» incluye lo público por diseño —webhooks entrantes,
@@ -623,6 +623,12 @@ controlador puede moverse de carpeta, pero la URL que consume el front no.
 | `GET` | `/api/profile` | `api` · `auth:sanctum` |
 | `PUT` | `/api/profile` | `api` · `auth:sanctum` |
 
+### push  
+
+| Método | Ruta | Guardas |
+|---|---|---|
+| `GET` | `/api/push/web-key` | `api` · `auth:sanctum` · `permission:chat.use` |
+
 ### report-sections  
 
 | Método | Ruta | Guardas |
@@ -999,6 +1005,7 @@ migraciones**: reflejan lo que hay, no lo que se pretendía.
 | `snapshot:export` | Exporta toda la instalación (base de datos + archivos) a un ZIP portable | a mano |
 | `snapshot:import` | Restaura un snapshot completo (base de datos + archivos) generado con snapshot:export | a mano |
 | `telegram:poll` | Sondea Telegram (dev) y procesa mensajes entrantes de captación | a mano |
+| `webpush:vapid` | Genera las llaves VAPID del push web (PWA) para pegarlas en el .env | a mano |
 
 > Todo esto cuelga de **un solo** `schedule:run` en el cron. Si ese cron no
 > está, no falla nada de forma visible: simplemente deja de correr.

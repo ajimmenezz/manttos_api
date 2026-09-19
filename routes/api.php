@@ -617,6 +617,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Push (fase 2): alta/baja del token del dispositivo.
         Route::post('/device-tokens',   [DeviceTokenController::class, 'store']);
         Route::delete('/device-tokens', [DeviceTokenController::class, 'destroy']);
+        Route::get('/push/web-key',     [DeviceTokenController::class, 'webKey']);
 
         // Búsqueda de texto en el hilo. Ruta estática ANTES del index para no chocar.
         Route::get('/conversations/{conversation}/messages/search', [MessageController::class, 'search']);
