@@ -24,6 +24,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Support\ExecutionDate;
 use App\Support\EventAudience;
 use App\Support\EventFolio;
 use App\Support\EventSla;
@@ -47,14 +48,14 @@ class EventController extends Controller
     {
         // El flag global habilita la fecha para todos; además, quien tenga el permiso
         // `activities.set-execution-date` (ingenieros por defecto; superadmin por bypass)
-        // puede fijarla/corregirla aunque el flag esté apagado. Tope = hoy (sin futuro).
+        // puede fijarla/corregirla aunque el flag esté apagado. Fecha Y hora, sin futuro;
+        // la interpretación (zona, forma vieja de solo fecha) vive en ExecutionDate.
         $allowed = AppSetting::executionDateAllowed()
             || (bool) optional(request()->user())->can('activities.set-execution-date');
         if (! $allowed || empty($provided)) {
             return $fallback;
         }
-        $d = Carbon::parse($provided);
-        return $d->startOfDay()->lte(Carbon::today()) ? $d : $fallback;
+        return ExecutionDate::parse($provided) ?? $fallback;
     }
 
     private function authorizeAccess(Request $request, Event $event): void
@@ -163,8 +164,9 @@ class EventController extends Controller
             'to'      => 'required|date|after_or_equal:from',
         ]);
 
-        $from = Carbon::parse($data['from'])->startOfDay();
-        $to   = Carbon::parse($data['to'])->endOfDay();
+        // Días LOCALES pasados a UTC, que es como se guarda occurred_at.
+        $from = ExecutionDate::dayStart($data['from']);
+        $to   = ExecutionDate::dayEndExclusive($data['to'])->subSecond();
         abort_if($from->diffInDays($to) > 366, 422, 'El rango no puede ser mayor a un año.');
 
         $site = Site::with('client:id,name,short_name')->findOrFail($data['site_id']);
@@ -252,8 +254,8 @@ class EventController extends Controller
                 'name'   => $site->name,
                 'client' => optional($site->client)->short_name ?: optional($site->client)->name,
             ],
-            'from'       => $from->toDateString(),
-            'to'         => $to->toDateString(),
+            'from'       => Carbon::parse($data['from'])->toDateString(),
+            'to'         => Carbon::parse($data['to'])->toDateString(),
             'count'      => $rows->count(),
             'events'     => $rows,
             'field_defs' => $fieldDefs, // { "typeId:systemId": [ {field_key,label,field_type,config,...} ] }
@@ -502,7 +504,8 @@ class EventController extends Controller
         $days = [];
 
         foreach ($payload['events'] ?? [] as $e) {
-            $when = Carbon::parse($e['occurred_at'] ?? $e['created_at'] ?? now());
+            // En hora LOCAL: el PDF agrupaba y ponía la hora en UTC.
+            $when = ExecutionDate::local($e['occurred_at'] ?? $e['created_at'] ?? now());
             $key  = $when->toDateString();
 
             $days[$key] ??= [

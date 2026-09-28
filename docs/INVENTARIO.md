@@ -3,7 +3,7 @@
 > **Este archivo se GENERA.** No lo edite a mano: se sobrescribe.
 > `php artisan manttos:inventario`
 >
-> Generado el 2026-09-19 03:52
+> Generado el 2026-09-28 15:31
 > Contra `mantenimientos` en `local`.
 
 Los **hechos** salen del router y del esquema, así que no pueden mentir. El
@@ -21,7 +21,7 @@ contra un ambiente atrasado, dirá lo de ese ambiente.
 | — con guarda declarada | **482** |
 | — sin guarda declarada | **0** |
 | Tablas (`mantenimientos`) | **87** |
-| Migraciones | **122** |
+| Migraciones | **123** |
 | Comandos propios | **12** |
 | Modelos | **69** |
 

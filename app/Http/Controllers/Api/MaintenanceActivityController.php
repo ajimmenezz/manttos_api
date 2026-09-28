@@ -20,6 +20,7 @@ use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
 use App\Services\Imports\AdistImportService;
 use App\Services\Webhooks\WebhookDispatcher;
+use App\Support\ExecutionDate;
 use App\Support\EventFolio;
 use App\Support\WebhookEvent;
 use Carbon\Carbon;
@@ -40,14 +41,14 @@ class MaintenanceActivityController extends Controller
     {
         // El flag global habilita la fecha para todos; además, quien tenga el permiso
         // `activities.set-execution-date` (ingenieros por defecto; superadmin por bypass)
-        // puede fijarla/corregirla aunque el flag esté apagado. Tope = hoy (sin futuro).
+        // puede fijarla/corregirla aunque el flag esté apagado. Fecha Y hora, sin futuro;
+        // la interpretación (zona, forma vieja de solo fecha) vive en ExecutionDate.
         $allowed = AppSetting::executionDateAllowed()
             || (bool) optional(request()->user())->can('activities.set-execution-date');
         if (! $allowed || empty($provided)) {
             return $fallback;
         }
-        $d = Carbon::parse($provided);
-        return $d->startOfDay()->lte(Carbon::today()) ? $d : $fallback;
+        return ExecutionDate::parse($provided) ?? $fallback;
     }
 
     private function authorizeAccess(Maintenance $maintenance): void
@@ -140,8 +141,8 @@ class MaintenanceActivityController extends Controller
         ]);
 
         $rows = MaintenanceActivity::where('maintenance_id', $maintenance->id)
-            ->when($filters['date_from'] ?? null, fn ($q, $d) => $q->whereDate('performed_at', '>=', $d))
-            ->when($filters['date_to']   ?? null, fn ($q, $d) => $q->whereDate('performed_at', '<=', $d))
+            ->when($filters['date_from'] ?? null, fn ($q, $d) => $q->where('performed_at', '>=', ExecutionDate::dayStart($d)))
+            ->when($filters['date_to']   ?? null, fn ($q, $d) => $q->where('performed_at', '<', ExecutionDate::dayEndExclusive($d)))
             ->select('device_id', 'activity_type_id', DB::raw('count(*) as cnt'))
             ->groupBy('device_id', 'activity_type_id')
             ->get();
@@ -318,7 +319,8 @@ class MaintenanceActivityController extends Controller
         $days = [];
 
         foreach ($entries as $e) {
-            $when = Carbon::parse($e['performed_at'] ?? now());
+            // En hora LOCAL: el PDF agrupaba y fechaba en UTC.
+            $when = ExecutionDate::local($e['performed_at'] ?? now());
             $key  = $when->toDateString();
 
             $days[$key] ??= [
@@ -373,12 +375,12 @@ class MaintenanceActivityController extends Controller
         // Datos del directorio marcados para bitácora: van como pares, que aprietan más
         // que un bloque por campo y son valores cortos.
         $pairs = [
-            ['Fecha',      $when->format('d/m/Y')],
+            ['Ejecución',  $when->format('d/m/Y H:i')],
             ['Capturó',    $e['user']['name'] ?? null],
         ];
 
         if ($showCreated && ! empty($e['created_at'])) {
-            $pairs[] = ['Registro', Carbon::parse($e['created_at'])->format('d/m/Y H:i')];
+            $pairs[] = ['Registro', ExecutionDate::local($e['created_at'])->format('d/m/Y H:i')];
         }
 
         foreach ($deviceFields as $def) {
@@ -493,8 +495,9 @@ class MaintenanceActivityController extends Controller
         // ── Actividades: fecha + dispositivo en scope ─────────────────────────
         $query = MaintenanceActivity::where('maintenance_id', $maintenance->id)
             ->whereIn('device_id', $scopedDeviceIds);
-        if (!empty($validated['date_from'])) $query->whereDate('performed_at', '>=', $validated['date_from']);
-        if (!empty($validated['date_to']))   $query->whereDate('performed_at', '<=', $validated['date_to']);
+        // Días LOCALES: con whereDate (día UTC) lo hecho después de las 18:00 caía fuera.
+        if (!empty($validated['date_from'])) $query->where('performed_at', '>=', ExecutionDate::dayStart($validated['date_from']));
+        if (!empty($validated['date_to']))   $query->where('performed_at', '<',  ExecutionDate::dayEndExclusive($validated['date_to']));
 
         $activities = $query->with([
                 'activityType:id,label',
