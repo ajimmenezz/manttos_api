@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\ExecutionDate;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ScopesEvents;
 use App\Models\Catalog;
@@ -35,8 +36,8 @@ class EventDashboardController extends Controller
     {
         abort_unless($request->user()->can('events.view'), 403);
 
-        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
-        $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
+        $dateFrom = $request->filled('date_from') ? ExecutionDate::dayStart($request->date_from) : null;
+        $dateTo   = $request->filled('date_to')   ? ExecutionDate::dayEnd($request->date_to)     : null;
 
         // ── Query base (scopeada por rol + filtros) ───────────────────────────
         $base = Event::query()
@@ -167,7 +168,7 @@ class EventDashboardController extends Controller
             ->sortByDesc('count')->values()->take(12);
 
         // ── Serie semanal (por fecha de ocurrencia, con fallback a created_at) ─
-        $weekly = $events->groupBy(fn ($e) => Carbon::parse($e->occurred_at ?? $e->created_at)->startOfWeek()->toDateString())
+        $weekly = $events->groupBy(fn ($e) => ExecutionDate::local($e->occurred_at ?? $e->created_at)->startOfWeek()->toDateString())
             ->map(fn ($g, $week) => [
                 'week_start' => $week,
                 'label'      => Carbon::parse($week)->isoFormat('DD MMM'),
@@ -826,8 +827,8 @@ class EventDashboardController extends Controller
     /** Eventos filtrados (base+scope+nature+field/dir filters) con relaciones para la lista. */
     private function filteredEventsForList(Request $request)
     {
-        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
-        $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
+        $dateFrom = $request->filled('date_from') ? ExecutionDate::dayStart($request->date_from) : null;
+        $dateTo   = $request->filled('date_to')   ? ExecutionDate::dayEnd($request->date_to)     : null;
 
         $base = Event::query()
             ->when($request->filled('client_id'),     fn ($q) => $q->where('events.client_id', $request->client_id))
@@ -1094,8 +1095,8 @@ class EventDashboardController extends Controller
     /** Conjunto de eventos filtrado (mismo pipeline que show) para la vista de plano. */
     private function filteredEventsForPlan(Request $request)
     {
-        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
-        $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
+        $dateFrom = $request->filled('date_from') ? ExecutionDate::dayStart($request->date_from) : null;
+        $dateTo   = $request->filled('date_to')   ? ExecutionDate::dayEnd($request->date_to)     : null;
 
         $base = Event::query()
             ->when($request->filled('client_id'),     fn ($q) => $q->where('events.client_id', $request->client_id))

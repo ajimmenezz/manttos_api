@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\ExecutionDate;
 use App\Http\Controllers\Controller;
 use App\Models\ActivityTypeField;
 use App\Models\Catalog;
@@ -100,7 +101,7 @@ class MaintenanceReportController extends Controller
             ])->sortByDesc('count')->values();
 
         // Serie semanal por fecha de captura.
-        $weekly = $activities->groupBy(fn ($a) => Carbon::parse($a->performed_at)->startOfWeek()->toDateString())
+        $weekly = $activities->groupBy(fn ($a) => ExecutionDate::local($a->performed_at)->startOfWeek()->toDateString())
             ->map(fn ($g, $week) => [
                 'week_start' => $week,
                 'label'      => Carbon::parse($week)->isoFormat('DD MMM'),
@@ -380,8 +381,8 @@ class MaintenanceReportController extends Controller
     /** Universo de capturas tras filtros escalares + scope por rol (sin filtros dinámicos). */
     private function scopedActivities(Request $request): Collection
     {
-        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
-        $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
+        $dateFrom = $request->filled('date_from') ? ExecutionDate::dayStart($request->date_from) : null;
+        $dateTo   = $request->filled('date_to')   ? ExecutionDate::dayEnd($request->date_to)     : null;
 
         $q = MaintenanceActivity::query()
             ->join('maintenances', 'maintenances.id', '=', 'maintenance_activities.maintenance_id')
@@ -886,7 +887,7 @@ class MaintenanceReportController extends Controller
         $cf     = ($a->device && is_array($a->device->custom_fields)) ? $a->device->custom_fields : [];
         $fv     = is_array($a->field_values) ? $a->field_values : [];
         $didKey = $this->didKeyForSystem((int) $a->system_id, $a->client_id ? (int) $a->client_id : null);
-        $when   = $a->performed_at ? Carbon::parse($a->performed_at) : null;
+        $when   = $a->performed_at ? ExecutionDate::local($a->performed_at) : null;
 
         $out = [
             'core:cliente'          => $this->clientName($a),

@@ -2,6 +2,7 @@
 
 namespace App\Services\Reports;
 
+use App\Support\ExecutionDate;
 use App\Models\Catalog;
 use App\Models\Device;
 use App\Models\Event;
@@ -245,7 +246,7 @@ class ExecutiveReport
             return $this->activities()
                 ->when($id !== '*', fn ($c) => $c->where('activity_type_id', (int) $id))
                 ->map(fn ($a) => [
-                    'date'   => Carbon::parse($a->performed_at),
+                    'date'   => ExecutionDate::local($a->performed_at),
                     'device' => $a->device,
                 ])->values();
         }
@@ -253,7 +254,7 @@ class ExecutiveReport
         return $this->events()
             ->when($id !== '*' && $id !== null, fn ($c) => $c->where('event_type_id', (int) $id))
             ->map(fn ($e) => [
-                'date'   => Carbon::parse($e->occurred_at ?? $e->created_at),
+                'date'   => ExecutionDate::local($e->occurred_at ?? $e->created_at),
                 'device' => $e->device,
             ])->values();
     }
@@ -431,8 +432,8 @@ class ExecutiveReport
                 'site'         => $this->site->name,
                 'client'       => $this->site->client?->name,
                 'system'       => $this->systemId ? Catalog::where('id', $this->systemId)->value('label') : null,
-                'from'         => $this->from->toDateString(),
-                'to'           => $this->to->toDateString(),
+                'from'         => ExecutionDate::local($this->from)->toDateString(),
+                'to'           => ExecutionDate::local($this->to)->toDateString(),
                 'period_label' => $this->periodLabel(),
                 'title'        => $config['title'] ?? 'Resumen de servicios del sitio',
                 'subtitle'     => $config['subtitle'] ?? null,
@@ -445,8 +446,8 @@ class ExecutiveReport
 
     private function periodLabel(): string
     {
-        $a = $this->from->locale('es')->isoFormat('MMMM YYYY');
-        $b = $this->to->locale('es')->isoFormat('MMMM YYYY');
+        $a = ExecutionDate::local($this->from)->locale('es')->isoFormat('MMMM YYYY');
+        $b = ExecutionDate::local($this->to)->locale('es')->isoFormat('MMMM YYYY');
         $label = $a === $b ? $a : "$a - $b";
 
         return mb_convert_case($label, MB_CASE_TITLE, 'UTF-8');

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\ExecutionDate;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\MaintenanceActivityFilters;
 use App\Models\ActivityTypeField;
@@ -46,9 +47,9 @@ class MaintenanceDashboardController extends Controller
 
         // ── Filtros ───────────────────────────────────────────────────────────
         $dateFrom = $request->filled('date_from')
-            ? Carbon::parse($request->date_from)->startOfDay() : null;
+            ? ExecutionDate::dayStart($request->date_from) : null;
         $dateTo   = $request->filled('date_to')
-            ? Carbon::parse($request->date_to)->endOfDay()     : null;
+            ? ExecutionDate::dayEnd($request->date_to)     : null;
 
         $filters = $this->parseMaintenanceFilters($request);
 
@@ -123,7 +124,7 @@ class MaintenanceDashboardController extends Controller
         $end   = Carbon::parse($maintenance->end_date)->endOfWeek();
 
         $weeklyRaw = $activities
-            ->groupBy(fn ($a) => Carbon::parse($a->performed_at)->startOfWeek()->toDateString());
+            ->groupBy(fn ($a) => ExecutionDate::local($a->performed_at)->startOfWeek()->toDateString());
 
         $weekly = [];
         $cursor = $start->copy();
@@ -186,8 +187,8 @@ class MaintenanceDashboardController extends Controller
         $systemId = $maintenance->catalog_id;
         $siteId   = $maintenance->site_id;
 
-        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->date_from)->startOfDay() : null;
-        $dateTo   = $request->filled('date_to')   ? Carbon::parse($request->date_to)->endOfDay()     : null;
+        $dateFrom = $request->filled('date_from') ? ExecutionDate::dayStart($request->date_from) : null;
+        $dateTo   = $request->filled('date_to')   ? ExecutionDate::dayEnd($request->date_to)     : null;
 
         // ── Universo base + filtros por campo (directorio + formulario) ───────
         $baseDeviceQuery = Device::whereHas('directory', fn ($q) =>
@@ -334,7 +335,7 @@ class MaintenanceDashboardController extends Controller
         $todayEnd    = Carbon::today()->endOfWeek();
         // No mostrar semanas futuras: el corte es la semana actual (o el fin del contrato si ya terminó).
         $weekEnd     = $todayEnd->lt($contractEnd) ? $todayEnd : $contractEnd;
-        $weeklyRaw = $activities->groupBy(fn ($a) => Carbon::parse($a->performed_at)->startOfWeek()->toDateString());
+        $weeklyRaw = $activities->groupBy(fn ($a) => ExecutionDate::local($a->performed_at)->startOfWeek()->toDateString());
         $weekly = [];
         $cursor = $start->copy();
         while ($cursor->lte($weekEnd)) {

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Support\ExecutionDate;
 use App\Models\AppSetting;
 use App\Models\Event;
 use App\Models\Notification;
@@ -42,8 +43,8 @@ class GenerateServiceSheetsZip implements ShouldQueue
             // Branding del tenant que solicitó el export (white-label por dominio); si no
             // se guardó tenant (exports viejos), cae al 'default'.
             $branding = AppSetting::allAsMap($export->tenant ?: AppSetting::DEFAULT_TENANT);
-            $from = $export->from_date->copy()->startOfDay();
-            $to   = $export->to_date->copy()->endOfDay();
+            $from = ExecutionDate::dayStart($export->from_date->toDateString());
+            $to   = ExecutionDate::dayEnd($export->to_date->toDateString());
 
             // Eventos del SITIO (si está definido) o del cliente (exports viejos) cuyo
             // momento efectivo (ocurrencia o creación) cae en el rango.

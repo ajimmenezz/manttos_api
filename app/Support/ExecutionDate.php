@@ -67,6 +67,12 @@ class ExecutionDate
         return self::toAppZone(Carbon::parse($date, self::TZ)->startOfDay()->addDay());
     }
 
+    /** Último instante del día LOCAL 'Y-m-d', en la zona de la app (para filtros «hasta» inclusivos). */
+    public static function dayEnd(string $date): Carbon
+    {
+        return self::dayEndExclusive($date)->subMicrosecond();
+    }
+
     /** Un instante guardado, visto en hora local (PDF, textos del servidor). */
     public static function local(CarbonInterface|string|null $value): ?Carbon
     {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\ExecutionDate;
 use App\Http\Controllers\Controller;
 use App\Models\ExecutiveReportTemplate;
 use App\Models\Site;
@@ -54,8 +55,8 @@ class ExecutiveReportController extends Controller
         return [
             $site,
             $data['system_id'] ?? null,
-            Carbon::parse($data['date_from'])->startOfDay(),
-            Carbon::parse($data['date_to'])->endOfDay(),
+            ExecutionDate::dayStart($data['date_from']),
+            ExecutionDate::dayEnd($data['date_to']),
         ];
     }
 

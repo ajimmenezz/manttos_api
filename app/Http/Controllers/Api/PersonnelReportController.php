@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\ExecutionDate;
 use App\Http\Controllers\Controller;
 use App\Support\ReportFilterSummary;
 use App\Support\ReportSections;
@@ -203,8 +204,8 @@ class PersonnelReportController extends Controller
             'role'       => 'nullable|string|max:60',
         ]);
 
-        $from = Carbon::parse($data['date_from'] ?? now()->startOfMonth())->startOfDay();
-        $to   = Carbon::parse($data['date_to'] ?? now())->endOfDay();
+        $from = ExecutionDate::dayStart($data['date_from'] ?? now(ExecutionDate::TZ)->startOfMonth()->toDateString());
+        $to   = ExecutionDate::dayEnd($data['date_to'] ?? now(ExecutionDate::TZ)->toDateString());
 
         $ids = collect(explode(',', (string) ($data['user_ids'] ?? '')))
             ->map(fn ($v) => (int) trim($v))
@@ -410,7 +411,7 @@ class PersonnelReportController extends Controller
     /** El día activo se cuenta por la fecha de negocio; la hora, por el instante real. */
     private function stamp(array &$person, $at, $ts = null): void
     {
-        $dia  = Carbon::parse($at)->toDateString();
+        $dia  = ExecutionDate::local($at)->toDateString();
         $hora = Carbon::parse($ts ?? $at)->setTimezone(self::TZ);
 
         $person['days'][$dia] = true;
@@ -476,7 +477,7 @@ class PersonnelReportController extends Controller
         $counts = array_fill(0, 7, 0);
 
         foreach ($sets as $set) {
-            foreach ($set as $r) $counts[(int) Carbon::parse($r->at)->dayOfWeek]++;
+            foreach ($set as $r) $counts[(int) ExecutionDate::local($r->at)->dayOfWeek]++;
         }
 
         // Se muestra de lunes a domingo, que es como se lee una semana de trabajo.
@@ -492,7 +493,7 @@ class PersonnelReportController extends Controller
 
         foreach ($sets as $set) {
             foreach ($set as $r) {
-                $k = Carbon::parse($r->at)->startOfWeek()->toDateString();
+                $k = ExecutionDate::local($r->at)->startOfWeek()->toDateString();
                 $weeks[$k] = ($weeks[$k] ?? 0) + 1;
             }
         }

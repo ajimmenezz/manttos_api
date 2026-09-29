@@ -2,6 +2,7 @@
 
 namespace App\Services\ServiceSheets;
 
+use App\Support\ExecutionDate;
 use App\Models\Event;
 use App\Models\EventComment;
 use App\Models\EventTypeField;
@@ -100,14 +101,14 @@ class ServiceSheetRenderer
             ->get()
             ->map(fn ($c) => [
                 'user' => $c->user->name ?? '—',
-                'date' => optional($c->created_at)->format('d/m/Y H:i'),
+                'date' => optional(ExecutionDate::local($c->created_at))->format('d/m/Y H:i'),
                 'body' => $this->plainBody((string) $c->body),
             ])->all();
 
         $history = $event->history->sortBy('created_at')->map(fn ($h) => [
             'from'  => optional($h->fromStatus)->label,
             'to'    => optional($h->toStatus)->label,
-            'date'  => optional($h->created_at)->format('d/m/Y H:i'),
+            'date'  => optional(ExecutionDate::local($h->created_at))->format('d/m/Y H:i'),
             'user'  => optional($h->user)->name ?? '—',
             'note'  => trim((string) $h->note) ?: null,
         ])->values()->all();
@@ -136,9 +137,9 @@ class ServiceSheetRenderer
                 'estado'       => optional($event->status)->label,
                 'impacto'      => $event->impact ? (self::IMPACT[$event->impact] ?? $event->impact) : null,
                 'urgencia'     => $event->urgency ? (self::URGENCY[$event->urgency] ?? $event->urgency) : null,
-                'ocurrencia'   => optional($event->occurred_at)->format('d/m/Y'),
+                'ocurrencia'   => optional(ExecutionDate::local($event->occurred_at))->format('d/m/Y H:i'),
                 'creado_por'   => optional($event->creator)->name,
-                'creado'       => optional($event->created_at)->format('d/m/Y H:i'),
+                'creado'       => optional(ExecutionDate::local($event->created_at))->format('d/m/Y H:i'),
                 'descripcion'  => $event->description,
             ],
             'device'   => $event->device ? [
@@ -153,7 +154,7 @@ class ServiceSheetRenderer
             'history'    => $history,
             'comments'   => $comments,
             'signatures' => $signatures,
-            'generatedAt' => now()->format('d/m/Y'),
+            'generatedAt' => now(ExecutionDate::TZ)->format('d/m/Y'),
         ];
     }
 
