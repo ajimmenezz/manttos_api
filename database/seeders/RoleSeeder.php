@@ -41,6 +41,7 @@ class RoleSeeder extends Seeder
             'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
             'chat.use', 'chat.group-manage',
             'webhooks.view', 'webhooks.manage',
+            'storage.view', 'storage.upload', 'storage.manage', 'storage.share',
         ]);
 
         // Admin de sitio: gestiona su(s) sitio(s): directorios, dispositivos y planos.
@@ -59,6 +60,7 @@ class RoleSeeder extends Seeder
             'solicitantes.view', 'solicitantes.create', 'solicitantes.edit', 'solicitantes.delete',
             'chat.use', 'chat.group-manage',
             'webhooks.view', 'webhooks.manage',
+            'storage.view', 'storage.upload', 'storage.manage', 'storage.share',
         ]);
 
         // Solicitante: usuario de portal / autoservicio. Solo levanta y da seguimiento
@@ -82,6 +84,8 @@ class RoleSeeder extends Seeder
             'activities.set-execution-date',
             'devices.request-change',
             'chat.use', 'chat.group-manage',
+            // Sin alcance propio en Almacenamiento: entra solo a lo que se le comparta.
+            'storage.view',
         ]);
 
         // Técnico: acceso mínimo (perfil propio). Se le otorgan permisos desde la UI.

@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    // Almacenamiento (módulo «Almacenamiento»): una unidad compartida de Google Workspace
+    // a la que solo entra una cuenta de servicio como «Gestor de contenido». La llave JSON
+    // vive fuera del repo (storage/app/private está ignorado).
+    'google_drive' => [
+        'credentials' => env('GOOGLE_DRIVE_CREDENTIALS', storage_path('app/private/google/drive-sa.json')),
+        'drive_id' => env('GOOGLE_DRIVE_ID'),
+        // Opcional: carpeta dentro de la unidad que hace de raíz (desarrollo usa una propia).
+        'root_id' => env('GOOGLE_DRIVE_ROOT_ID'),
+        'max_upload_mb' => (int) env('GOOGLE_DRIVE_MAX_UPLOAD_MB', 5120),
+    ],
+
 ];

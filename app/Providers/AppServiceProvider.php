@@ -29,6 +29,15 @@ class AppServiceProvider extends ServiceProvider
             $model::observe(ActivityObserver::class);
         }
 
+        // Almacenamiento: la carpeta de un cliente o sitio sigue su nombre también en Drive.
+        // `syncAnchorName` nunca lanza: un fallo de Drive no impide guardar el cliente.
+        \App\Models\Client::updated(function ($client) {
+            if ($client->wasChanged('name')) app(\App\Services\Storage\StorageTree::class)->syncAnchorName('client', $client->id, $client->name);
+        });
+        \App\Models\Site::updated(function ($site) {
+            if ($site->wasChanged('name')) app(\App\Services\Storage\StorageTree::class)->syncAnchorName('site', $site->id, $site->name);
+        });
+
         // Inyectar colores, logo y nombre en todos los templates de correo
         View::composer('emails.*', function ($view) {
             $settings = AppSetting::allAsMap();

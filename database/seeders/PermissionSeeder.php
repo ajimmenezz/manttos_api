@@ -165,6 +165,16 @@ class PermissionSeeder extends Seeder
         'integrations.view',            // ver integraciones y su bitácora (superadmin)
         'integrations.manage',          // configurar/probar/activar integraciones (superadmin)
         'integrations.import-external',  // importar datos de un sistema anterior (ADIST) a un mantenimiento (superadmin)
+
+        // ── Almacenamiento (Google Drive como motor) ────────────────
+        // El ALCANCE (qué carpetas ve) sale del rol y de lo compartido; estos dicen qué
+        // puede HACER en las carpetas de su alcance. Lo compartido trae su propio nivel.
+        'storage.view',                 // entrar al módulo (sin esto no ve ni lo compartido)
+        'storage.upload',               // subir archivos y crear subcarpetas en lo de su alcance
+        'storage.manage',               // renombrar y mover en lo de su alcance
+        'storage.share',                // compartir lo de su alcance con usuarios (roles: solo admins)
+        'storage.create-free-folders',  // crear carpetas libres (no ligadas a cliente ni sitio)
+        'storage.archive',              // mandar a la papelera, verla y restaurar (superadmin por defecto)
     ];
 
     public function run(): void

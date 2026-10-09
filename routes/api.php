@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityTypeController;
+use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\AiChatController;
 use App\Http\Controllers\Api\AiLogController;
 use App\Http\Controllers\Api\AiSettingController;
@@ -111,6 +112,17 @@ Route::get('/snapshots/{name}/file', [SnapshotController::class, 'file'])
 Route::get('/snapshots/import-progress', [SnapshotController::class, 'importProgress'])
     ->middleware('signed')
     ->name('snapshots.import-progress');
+
+// Almacenamiento: ver/descargar y miniaturas con enlace TEMPORAL FIRMADO, porque
+// <img>, <video> y una pestaña nueva no pueden mandar el token. La firma la emite
+// /storage/files/{f}/link a quien ya tiene acceso y va ligada a ese usuario (`u`);
+// el controlador revalida su acceso al servir.
+Route::get('/storage/files/{file}/content', [StorageController::class, 'content'])
+    ->middleware('signed')
+    ->name('storage.content');
+Route::get('/storage/files/{file}/thumbnail', [StorageController::class, 'thumbnail'])
+    ->middleware('signed')
+    ->name('storage.thumbnail');
 
 // Errores de la app móvil. FUERA de auth:sanctum a propósito: el error que más
 // urge capturar es el que ocurre sin sesión (o cuando se perdió), que es justo
@@ -720,6 +732,31 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/clients/{client}/sites/{site}/engineers/candidates', [SiteEngineerController::class, 'candidates']);
     Route::post('/clients/{client}/sites/{site}/engineers', [SiteEngineerController::class, 'store']);
     Route::delete('/clients/{client}/sites/{site}/engineers/{user}', [SiteEngineerController::class, 'destroy']);
+
+    // Almacenamiento (Google Drive como motor; permisos y bitácora aquí). Ver StorageController.
+    Route::prefix('/storage')->group(function () {
+        Route::get('/home',                          [StorageController::class, 'home']);
+        Route::get('/search',                        [StorageController::class, 'search']);
+        Route::get('/destinations',                  [StorageController::class, 'destinations']);
+        Route::get('/trash',                         [StorageController::class, 'trashIndex']);
+        Route::get('/clients/{client}/folder',       [StorageController::class, 'clientFolder']);
+        Route::get('/sites/{site}/folder',           [StorageController::class, 'siteFolder']);
+        Route::get('/folders/{folder}',              [StorageController::class, 'folder']);
+        Route::post('/folders',                      [StorageController::class, 'storeFolder']);
+        Route::post('/folders/{folder}/uploads',     [StorageController::class, 'startUpload']);
+        Route::post('/files/{file}/complete',        [StorageController::class, 'completeUpload']);
+        Route::post('/files/{file}/cancel',          [StorageController::class, 'cancelUpload']);
+        Route::get('/files/{file}/link',             [StorageController::class, 'link']);
+        Route::delete('/shares/{share}',             [StorageController::class, 'unshare']);
+        Route::patch('/{type}/{id}/rename',          [StorageController::class, 'rename'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::post('/{type}/{id}/move',             [StorageController::class, 'move'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::get('/{type}/{id}/shares',            [StorageController::class, 'shares'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::get('/{type}/{id}/share-candidates',  [StorageController::class, 'shareCandidates'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::post('/{type}/{id}/shares',           [StorageController::class, 'share'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::post('/{type}/{id}/trash',            [StorageController::class, 'trash'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::post('/{type}/{id}/restore',          [StorageController::class, 'restore'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+        Route::get('/{type}/{id}/activity',          [StorageController::class, 'activity'])->whereIn('type', ['folder', 'file'])->whereNumber('id');
+    });
 });
 
 /*

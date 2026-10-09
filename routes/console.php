@@ -13,3 +13,6 @@ Schedule::command('activity:prune')->dailyAt('03:15');
 
 // Misma retención para la bitácora de errores de la app móvil.
 Schedule::command('app-errors:prune')->dailyAt('03:20');
+
+// Almacenamiento: confirma contra Google Drive las subidas que el cliente no cerró.
+Schedule::command('storage:reconcile')->everyFifteenMinutes()->withoutOverlapping();

@@ -3,7 +3,7 @@
 > **Este archivo se GENERA.** No lo edite a mano: se sobrescribe.
 > `php artisan manttos:inventario`
 >
-> Generado el 2026-09-29 17:15
+> Generado el 2026-10-09 03:57
 > Contra `mantenimientos` en `local`.
 
 Los **hechos** salen del router y del esquema, así que no pueden mentir. El
@@ -17,13 +17,13 @@ contra un ambiente atrasado, dirá lo de ese ambiente.
 
 | | |
 |---|---:|
-| Rutas de API | **482** |
-| — con guarda declarada | **482** |
+| Rutas de API | **505** |
+| — con guarda declarada | **505** |
 | — sin guarda declarada | **0** |
-| Tablas (`mantenimientos`) | **87** |
-| Migraciones | **123** |
-| Comandos propios | **12** |
-| Modelos | **69** |
+| Tablas (`mantenimientos`) | **91** |
+| Migraciones | **125** |
+| Comandos propios | **13** |
+| Modelos | **73** |
 
 > «Sin guarda declarada» incluye lo público por diseño —webhooks entrantes,
 > login, páginas abiertas—: no todas son un pendiente.
@@ -718,6 +718,34 @@ controlador puede moverse de carpeta, pero la URL que consume el front no.
 | `PUT` | `/api/solicitantes/{user}` | `api` · `auth:sanctum` |
 | `POST` | `/api/solicitantes/{user}/access-link` | `api` · `auth:sanctum` |
 
+### storage  
+
+| Método | Ruta | Guardas |
+|---|---|---|
+| `GET` | `/api/storage/clients/{client}/folder` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/destinations` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/files/{file}/cancel` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/files/{file}/complete` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/files/{file}/content` | `api` · `signed` |
+| `GET` | `/api/storage/files/{file}/link` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/files/{file}/thumbnail` | `api` · `signed` |
+| `POST` | `/api/storage/folders` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/folders/{folder}` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/folders/{folder}/uploads` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/home` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/search` | `api` · `auth:sanctum` |
+| `DELETE` | `/api/storage/shares/{share}` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/sites/{site}/folder` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/trash` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/{type}/{id}/activity` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/{type}/{id}/move` | `api` · `auth:sanctum` |
+| `PATCH` | `/api/storage/{type}/{id}/rename` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/{type}/{id}/restore` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/{type}/{id}/share-candidates` | `api` · `auth:sanctum` |
+| `GET` | `/api/storage/{type}/{id}/shares` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/{type}/{id}/shares` | `api` · `auth:sanctum` |
+| `POST` | `/api/storage/{type}/{id}/trash` | `api` · `auth:sanctum` |
+
 ### systems  
 
 | Método | Ruta | Guardas |
@@ -894,6 +922,12 @@ De la tabla `permissions`, que es la fuente de verdad: **no están en el código
 | `reports.personnel` | — |
 | `app-errors.view` | — |
 | `app-errors.resolve` | — |
+| `storage.view` | — |
+| `storage.upload` | — |
+| `storage.manage` | — |
+| `storage.share` | — |
+| `storage.create-free-folders` | — |
+| `storage.archive` | — |
 
 
 ## 4. Esquema de datos — `mantenimientos`
@@ -981,6 +1015,10 @@ migraciones**: reflejan lo que hay, no lo que se pretendía.
 - **`snapshot_exports`** — id (núm), status (texto), file_name (texto), size (núm, opcional), no_media (sí/no), error (texto largo, opcional), requested_by (núm), created_at (fecha, opcional), updated_at (fecha, opcional)
 - **`solicitante_client`** — user_id (núm), client_id (núm), created_at (fecha, opcional), updated_at (fecha, opcional)
 - **`solicitante_site`** — user_id (núm), site_id (núm), created_at (fecha, opcional), updated_at (fecha, opcional)
+- **`storage_events`** — id (núm), user_id (núm, opcional), action (texto), item_type (texto), item_id (núm), item_name (texto, opcional), meta (json, opcional), ip (texto, opcional), user_agent (texto, opcional), created_at (fecha, opcional)
+- **`storage_files`** — id (núm), folder_id (núm), name (texto), mime_type (texto, opcional), size (núm, opcional), drive_id (texto, opcional), status (texto), md5 (texto, opcional), sha256 (texto, opcional), upload_url (texto largo, opcional), client_id (núm, opcional), site_id (núm, opcional), owner_id (núm, opcional), path (texto), uploaded_by (núm, opcional), uploaded_at (fecha, opcional), trashed_at (fecha, opcional), trashed_by (núm, opcional), trash_root_type (texto, opcional), trash_root_id (núm, opcional), created_at (fecha, opcional), updated_at (fecha, opcional)
+- **`storage_folders`** — id (núm), parent_id (núm, opcional), kind (texto), system_key (texto, opcional), name (texto), drive_id (texto, opcional), path (texto), client_id (núm, opcional), site_id (núm, opcional), owner_id (núm, opcional), created_by (núm, opcional), trashed_at (fecha, opcional), trashed_by (núm, opcional), trash_root_type (texto, opcional), trash_root_id (núm, opcional), created_at (fecha, opcional), updated_at (fecha, opcional)
+- **`storage_shares`** — id (núm), item_type (texto), item_id (núm), grantee_type (texto), grantee_id (núm), level (texto), created_by (núm, opcional), created_at (fecha, opcional), updated_at (fecha, opcional)
 - **`system_device_types`** — id (núm), system_catalog_id (núm), device_type_catalog_id (núm), created_at (fecha, opcional), updated_at (fecha, opcional)
 - **`system_fields`** — id (núm), catalog_id (núm), label (texto), field_key (texto), field_type (texto), catalog_type (texto, opcional), is_required (sí/no), max_length (núm, opcional), sort_order (núm), is_active (sí/no), created_by (núm, opcional), created_at (fecha, opcional), updated_at (fecha, opcional), client_id (núm, opcional), show_in_bitacora (sí/no), show_in_dashboard (sí/no), config (json, opcional), show_in_event_report (sí/no), show_in_service_sheet (sí/no)
 - **`task_durations`** — id (núm), system_id (núm), device_type_id (núm), activity_type_id (núm), minutes (núm), created_at (fecha, opcional), updated_at (fecha, opcional)
@@ -1004,6 +1042,7 @@ migraciones**: reflejan lo que hay, no lo que se pretendía.
 | `media:optimize` | Reduce el peso de las imágenes ya almacenadas, sin cambiar de formato | a mano |
 | `snapshot:export` | Exporta toda la instalación (base de datos + archivos) a un ZIP portable | a mano |
 | `snapshot:import` | Restaura un snapshot completo (base de datos + archivos) generado con snapshot:export | a mano |
+| `storage:reconcile` | Confirma contra Google Drive las subidas que quedaron pendientes. | `*/15 * * * *` |
 | `telegram:poll` | Sondea Telegram (dev) y procesa mensajes entrantes de captación | a mano |
 | `webpush:vapid` | Genera las llaves VAPID del push web (PWA) para pegarlas en el .env | a mano |
 
