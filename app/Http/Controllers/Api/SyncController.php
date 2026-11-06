@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Device;
 use App\Models\Event;
 use App\Models\EventStatus;
+use App\Support\EventSla;
 use App\Models\Maintenance;
 use App\Models\MaintenanceActivity;
 use App\Models\Site;
@@ -185,15 +186,25 @@ class SyncController extends Controller
     public function events(Request $request): JsonResponse
     {
         $terminales = EventStatus::where('is_terminal', true)->pluck('id');
+        // SLA con la MISMA medición que la ficha del evento (EventSla::measure): plazos por nivel en horario hábil.
+        // El consumidor recibe plazo y hora de atención por nivel, así puede decidir «vencido» con su propio reloj
+        // aunque el evento no haya cambiado (un pendiente se vuelve vencido sin tocar updated_at).
+        $tiers     = EventSla::tiers();
+        $statusMap = EventStatus::whereNotNull('sla_tier_id')->pluck('sla_tier_id', 'id')->all();
+        $ajustes   = [];
         $query = Event::query()
-            ->with(['system:id,label', 'eventType:id,label,nature', 'status:id,key,label,category,is_terminal', 'assignee:id,name'])
+            ->with(['system:id,label', 'eventType:id,label,nature', 'status:id,key,label,category,is_terminal', 'assignee:id,name', 'history'])
             // Cuándo quedó cerrado: la última vez que pasó a un estado terminal (si hoy está en uno).
             ->addSelect(['events.*', 'closed_at' => \App\Models\EventStatusHistory::query()
                 ->selectRaw('max(created_at)')->whereColumn('event_id', 'events.id')
                 ->whereIn('to_status_id', $terminales)]);
         $this->recortar($request, $query, 'events.site_id');
 
-        return $this->pagina($request, $query, 'events', fn (Event $e) => [
+        return $this->pagina($request, $query, 'events', function (Event $e) use (&$ajustes, $statusMap, $tiers) { return [
+            'sla'                    => EventSla::measure($e, $ajustes[$e->client_id] ??= EventSla::resolve($e->client_id), $statusMap, $tiers),
+            // Primera respuesta = primer cambio de estado REAL (con estado anterior): el historial también registra
+            // el estado inicial al crear el evento, y contarlo daría «respondido en 0 h» en todos.
+            'first_response_at'      => self::fecha($e->history->first(fn ($h) => $h->from_status_id !== null)?->created_at),
             'id'                     => $e->id,
             'folio'                  => $e->folio,
             'client_id'              => $e->client_id,
@@ -219,6 +230,6 @@ class SyncController extends Controller
             'closed_at'              => $e->status?->is_terminal ? self::fecha($e->closed_at) : null,
             'archived_at'            => self::fecha($e->archived_at),
             'updated_at'             => self::fecha($e->updated_at),
-        ]);
+        ]; });
     }
 }
