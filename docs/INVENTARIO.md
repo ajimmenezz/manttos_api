@@ -3,7 +3,7 @@
 > **Este archivo se GENERA.** No lo edite a mano: se sobrescribe.
 > `php artisan manttos:inventario`
 >
-> Generado el 2026-11-06 03:30
+> Generado el 2026-11-06 04:26
 > Contra `mantenimientos` en `local`.
 
 Los **hechos** salen del router y del esquema, así que no pueden mentir. El
@@ -17,8 +17,8 @@ contra un ambiente atrasado, dirá lo de ese ambiente.
 
 | | |
 |---|---:|
-| Rutas de API | **505** |
-| — con guarda declarada | **505** |
+| Rutas de API | **510** |
+| — con guarda declarada | **510** |
 | — sin guarda declarada | **0** |
 | Tablas (`mantenimientos`) | **91** |
 | Migraciones | **125** |
@@ -745,6 +745,16 @@ controlador puede moverse de carpeta, pero la URL que consume el front no.
 | `GET` | `/api/storage/{type}/{id}/shares` | `api` · `auth:sanctum` |
 | `POST` | `/api/storage/{type}/{id}/shares` | `api` · `auth:sanctum` |
 | `POST` | `/api/storage/{type}/{id}/trash` | `api` · `auth:sanctum` |
+
+### sync  
+
+| Método | Ruta | Guardas |
+|---|---|---|
+| `GET` | `/api/v1/sync/activities` | `api` · `auth:sanctum` |
+| `GET` | `/api/v1/sync/devices` | `api` · `auth:sanctum` |
+| `GET` | `/api/v1/sync/events` | `api` · `auth:sanctum` |
+| `GET` | `/api/v1/sync/maintenances` | `api` · `auth:sanctum` |
+| `GET` | `/api/v1/sync/sites` | `api` · `auth:sanctum` |
 
 ### systems  
 

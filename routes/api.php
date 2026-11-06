@@ -67,6 +67,7 @@ use App\Http\Controllers\Api\ReportExportTemplateController;
 use App\Http\Controllers\Api\ReportSectionController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SiteController;
+use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\SnapshotController;
 use App\Http\Controllers\Api\SiteEngineerController;
 use App\Http\Controllers\Api\SiteUserController;
@@ -794,6 +795,16 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/maintenances/{maintenance}/dashboard',          [MaintenanceDashboardController::class, 'show']);
     Route::get('/maintenances/{maintenance}/contract-dashboard', [MaintenanceDashboardController::class, 'contractDashboard']);
     Route::get('/maintenances/{maintenance}/devices/{device}/activities', [MaintenanceActivityController::class, 'deviceActivities']);
+
+    // Sincronización (solo lectura) para otros sistemas de Siccob: todo lo del alcance de la llave, plano y
+    // con `updated_since`. Ver SyncController (incluye dispositivos, recortados por sitio del usuario).
+    Route::prefix('sync')->group(function () {
+        Route::get('/sites',        [SyncController::class, 'sites']);
+        Route::get('/devices',      [SyncController::class, 'devices']);
+        Route::get('/maintenances', [SyncController::class, 'maintenances']);
+        Route::get('/activities',   [SyncController::class, 'activities']);
+        Route::get('/events',       [SyncController::class, 'events']);
+    });
 
     // Escritura: requiere una llave con scope de escritura Y el permiso del usuario.
     Route::middleware(RequireWriteScope::class)->group(function () {
