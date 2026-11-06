@@ -1065,7 +1065,7 @@ class EventDashboardController extends Controller
             ->where('is_active', true)
             ->with(['placements' => fn ($q) => $q
                 ->whereIn('device_id', $deviceIds)
-                ->with('device:id,name,device_type,custom_fields')])
+                ->with('device:id,name,device_type,custom_fields,directory_id', 'device.directory:id,catalog_id', 'device.directory.system:id,label')])
             ->orderBy('sort_order')->orderBy('id')
             ->get()
             ->map(fn (FloorPlan $p) => [
@@ -1081,6 +1081,9 @@ class EventDashboardController extends Controller
                     'name'          => $pl->device?->name,
                     'device_type'   => $pl->device?->device_type,
                     'custom_fields' => $pl->device?->custom_fields,
+                    // Sistema del dispositivo: lo necesita «Levantar evento» desde el plano.
+                    'system_id'     => $pl->device?->directory?->catalog_id,
+                    'system_label'  => $pl->device?->directory?->system?->label,
                     'events'        => $byDevice->get($pl->device_id),
                 ])->values(),
             ]);
