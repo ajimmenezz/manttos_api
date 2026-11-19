@@ -155,6 +155,7 @@ class PermissionSeeder extends Seeder
         'report-sections.manage',       // qué secciones de los reportes-tablero ve cada rol/usuario
         'reports.executive',            // generar el reporte ejecutivo por sitio (PDF para el cliente)
 'reports.personnel',            // análisis de personal: qué hace cada usuario y cuándo (reporte interno)
+        'reports.clss',                 // reporte CLSS: pruebas y señales de los paneles de incendio (lee el tablero CLSS)
 
         // ── Documentación ───────────────────────────────────────────
         'manuals.view',                 // guías completas web/móvil

@@ -6,6 +6,7 @@ use App\Jobs\RunIntegration;
 use App\Models\Integration;
 use App\Models\IntegrationLog;
 use App\Support\Integrations\IntegrationProvider;
+use App\Support\Integrations\Providers\ClssProvider;
 use App\Support\Integrations\Providers\JiraServiceManagementProvider;
 use App\Support\Integrations\Providers\OdooProvider;
 
@@ -29,6 +30,7 @@ class IntegrationManager
         return [
             'odoo' => new OdooProvider(),
             'jira' => new JiraServiceManagementProvider(),
+            'clss' => new ClssProvider(),
         ];
     }
 

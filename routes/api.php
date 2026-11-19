@@ -51,6 +51,7 @@ use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\EventDashboardController;
 use App\Http\Controllers\Api\ServiceSheetExportController;
 use App\Http\Controllers\Api\EventTypeController;
+use App\Http\Controllers\Api\ClssReportController;
 use App\Http\Controllers\Api\ExecutiveReportController;
 use App\Http\Controllers\Api\UserPreferenceController;
 use App\Http\Controllers\Api\EventStatusController;
@@ -648,6 +649,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/executive/options',  [ExecutiveReportController::class, 'options']);
     Route::get('/reports/executive/preview',  [ExecutiveReportController::class, 'preview']);
     Route::get('/reports/executive/pdf',      [ExecutiveReportController::class, 'pdf']);
+    // Reporte CLSS: lo que reportan los paneles de Honeywell, leído del tablero CLSS (permiso reports.clss).
+    Route::get('/reports/clss/estado',          [ClssReportController::class, 'estado']);
+    Route::get('/reports/clss/pruebas',         [ClssReportController::class, 'pruebas']);
+    Route::get('/reports/clss/pruebas/detalle', [ClssReportController::class, 'pruebasDetalle']);
+    Route::get('/reports/clss/eventos',         [ClssReportController::class, 'eventos']);
+    Route::get('/reports/clss/eventos/detalle', [ClssReportController::class, 'eventosDetalle']);
+    Route::get('/reports/clss/export',          [ClssReportController::class, 'export']);
     // Análisis de personal (reporte interno de gestión, permiso propio).
     Route::get('/reports/personnel',     [PersonnelReportController::class, 'show']);
     Route::get('/reports/personnel/pdf', [PersonnelReportController::class, 'pdf']);

@@ -3,7 +3,7 @@
 > **Este archivo se GENERA.** No lo edite a mano: se sobrescribe.
 > `php artisan manttos:inventario`
 >
-> Generado el 2026-11-06 04:26
+> Generado el 2026-11-19 04:04
 > Contra `mantenimientos` en `local`.
 
 Los **hechos** salen del router y del esquema, así que no pueden mentir. El
@@ -17,11 +17,11 @@ contra un ambiente atrasado, dirá lo de ese ambiente.
 
 | | |
 |---|---:|
-| Rutas de API | **510** |
-| — con guarda declarada | **510** |
+| Rutas de API | **516** |
+| — con guarda declarada | **516** |
 | — sin guarda declarada | **0** |
 | Tablas (`mantenimientos`) | **91** |
-| Migraciones | **125** |
+| Migraciones | **126** |
 | Comandos propios | **13** |
 | Modelos | **73** |
 
@@ -650,6 +650,12 @@ controlador puede moverse de carpeta, pero la URL que consume el front no.
 
 | Método | Ruta | Guardas |
 |---|---|---|
+| `GET` | `/api/reports/clss/estado` | `api` · `auth:sanctum` |
+| `GET` | `/api/reports/clss/eventos` | `api` · `auth:sanctum` |
+| `GET` | `/api/reports/clss/eventos/detalle` | `api` · `auth:sanctum` |
+| `GET` | `/api/reports/clss/export` | `api` · `auth:sanctum` |
+| `GET` | `/api/reports/clss/pruebas` | `api` · `auth:sanctum` |
+| `GET` | `/api/reports/clss/pruebas/detalle` | `api` · `auth:sanctum` |
 | `GET` | `/api/reports/executive/options` | `api` · `auth:sanctum` |
 | `GET` | `/api/reports/executive/pdf` | `api` · `auth:sanctum` |
 | `GET` | `/api/reports/executive/preview` | `api` · `auth:sanctum` |
@@ -938,6 +944,7 @@ De la tabla `permissions`, que es la fuente de verdad: **no están en el código
 | `storage.share` | — |
 | `storage.create-free-folders` | — |
 | `storage.archive` | — |
+| `reports.clss` | — |
 
 
 ## 4. Esquema de datos — `mantenimientos`
