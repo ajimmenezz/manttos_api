@@ -3,7 +3,7 @@
 > **Este archivo se GENERA.** No lo edite a mano: se sobrescribe.
 > `php artisan manttos:inventario`
 >
-> Generado el 2026-11-19 04:04
+> Generado el 2026-11-19 05:02
 > Contra `mantenimientos` en `local`.
 
 Los **hechos** salen del router y del esquema, así que no pueden mentir. El

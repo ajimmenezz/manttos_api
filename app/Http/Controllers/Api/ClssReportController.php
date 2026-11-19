@@ -32,7 +32,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class ClssReportController extends Controller
 {
     /** Parámetros que se reenvían al tablero tal cual (el resto se ignora). */
-    private const PARAMS = ['desde', 'hasta', 'periodo', 'edificio', 'panel', 'tipo', 'tecnico', 'estado', 'clase', 'pagina', 'por_pagina'];
+    // `conexion` (conectados|sin_conectar) solo tiene efecto sin recorte de sitios: el tablero ignora los edificios sin
+    // sitio en cuanto recibe `sitios`, así que a un usuario con alcance nunca le llegan.
+    private const PARAMS = ['desde', 'hasta', 'periodo', 'edificio', 'panel', 'tipo', 'tecnico', 'estado', 'clase', 'conexion', 'pagina', 'por_pagina'];
     private const CACHE_SEG = 300;
     private const TOPE_EXCEL = 100000;
 
